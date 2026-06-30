@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OHIMS Uganda — Online Health Insurance Management System</title>
+    <script>
+      // Automatically clean up service workers registered by other apps on localhost:3000 (e.g. AgriLink)
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then((registrations) => {
+          if (registrations.length > 0) {
+            for (const registration of registrations) {
+              registration.unregister().then((success) => {
+                if (success) {
+                  console.log('Cleaned up service worker from previous project:', registration);
+                  // Reload the page once to pull the fresh Vite/React content
+                  window.location.reload();
+                }
+              });
+            }
+          }
+        });
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

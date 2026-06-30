@@ -1,0 +1,153 @@
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+/* Smooth transition for theme switches */
+.transition-colors,
+body,
+div,
+header,
+main,
+section,
+nav,
+button,
+input,
+select,
+textarea {
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 200ms;
+}
+
+/* Dark mode overrides for high accessibility */
+html.dark {
+  color-scheme: dark;
+}
+
+html.dark body {
+  background-color: #030712; /* Slate-950 */
+  color: #f1f5f9; /* Slate-100 */
+}
+
+/* Card backgrounds across all dashboards */
+.dark .bg-white {
+  background-color: #0f172a !important; /* Slate-900 */
+}
+
+/* Sidebar and background light-slate elements */
+.dark .bg-slate-50,
+.dark .bg-gray-50 {
+  background-color: #030712 !important; /* Slate-950 background consistency */
+}
+
+.dark .bg-slate-100,
+.dark .bg-gray-100 {
+  background-color: #1e293b !important; /* Slate-800 */
+}
+
+.dark .hover\:bg-slate-50:hover,
+.dark .hover\:bg-slate-100:hover,
+.dark .hover\:bg-slate-100\/75:hover,
+.dark .hover\:bg-gray-50:hover,
+.dark .hover\:bg-gray-100:hover {
+  background-color: #1e293b !important; /* Slate-800 */
+}
+
+/* Card and component border rules */
+.dark .border-gray-50,
+.dark .border-slate-50,
+.dark .border-gray-100,
+.dark .border-slate-100,
+.dark .border-gray-200,
+.dark .border-slate-200,
+.dark .border-slate-150 {
+  border-color: #1e293b !important; /* Slate-800 */
+}
+
+/* Table border rules */
+.dark .divide-gray-50,
+.dark .divide-slate-50,
+.dark .divide-gray-100,
+.dark .divide-slate-100 {
+  border-color: #1e293b !important; /* Slate-800 */
+}
+
+/* High contrast primary titles and labels */
+.dark .text-slate-900,
+.dark .text-gray-900,
+.dark .text-slate-800,
+.dark .text-gray-800,
+.dark .text-\[\#0A1628\],
+.dark .text-\[\#0a1628\] {
+  color: #f8fafc !important; /* Slate-50 */
+}
+
+/* Accessible color for secondary text, metadata, descriptions, and labels */
+.dark .text-slate-505,
+.dark .text-gray-500,
+.dark .text-slate-600,
+.dark .text-gray-600 {
+  color: #cbd5e1 !important; /* Slate-300 - enhanced accessibility */
+}
+
+.dark .text-slate-400,
+.dark .text-gray-400 {
+  color: #94a3b8 !important; /* Slate-400 */
+}
+
+/* Input Fields and Select Dropdowns */
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+  border-color: #334155 !important;
+}
+
+.dark input:focus,
+.dark select:focus,
+.dark textarea:focus {
+  border-color: #0d9488 !important; /* Teal accent */
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.2);
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #64748b !important;
+}
+
+/* Recharts element tuning */
+.dark .recharts-cartesian-grid-horizontal line,
+.dark .recharts-cartesian-grid-vertical line {
+  stroke: #1e293b !important;
+}
+
+.dark .recharts-text {
+  fill: #94a3b8 !important;
+}
+
+.dark .recharts-legend-item-text {
+  color: #cbd5e1 !important;
+}
+
+/* Calendar or active items elements */
+.dark .text-teal-900 {
+  color: #ccfbf1 !important;
+}
+
+.dark .bg-teal-50 {
+  background-color: rgba(13, 148, 136, 0.15) !important;
+}
+
+.dark .bg-amber-100 {
+  background-color: rgba(217, 119, 6, 0.15) !important;
+}
+.dark .text-amber-800 {
+  color: #fef3c7 !important;
+}
+
+/* Option tags inside select element */
+.dark select option {
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+}

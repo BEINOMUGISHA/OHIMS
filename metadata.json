@@ -1,0 +1,6 @@
+{
+  "name": "Online Health Insurance Management System",
+  "description": "A comprehensive digital framework for managing health insurance policies, claims, member onboarding, premium tracking, and provider partnerships with full transparency, audit logging, and automated workflows.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

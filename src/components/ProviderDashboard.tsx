@@ -19,6 +19,7 @@ import {
   Briefcase
 } from 'lucide-react';
 import { User, Provider, Claim, Member } from '../types';
+import { providersApi, claimsApi, membersApi } from '../lib/api';
 
 interface ProviderDashboardProps {
   currentUser: User;
@@ -48,35 +49,29 @@ export default function ProviderDashboard({ currentUser, onRefreshData }: Provid
   const fetchProviderData = async () => {
     try {
       setLoading(true);
-      
-      // Locate provider matching this hospital contact details
-      const provRes = await fetch('/api/providers');
-      const allProvs: Provider[] = await provRes.json();
-      
-      const match = allProvs.find(p => p.contact.includes(currentUser.phone) || p.name.toLowerCase().includes(currentUser.name.split(' ')[0].toLowerCase()));
-      const activeProv = match || allProvs[0]; 
+
+      // Fetch all providers and find matching one
+      const allProvs = await providersApi.list();
+      const match = allProvs.find((p: any) =>
+        p.contact?.includes(currentUser.phone) ||
+        p.name?.toLowerCase().includes(currentUser.name.split(' ')[0].toLowerCase())
+      );
+      const activeProv = (match || allProvs[0]) as unknown as Provider;
       setActiveProvider(activeProv);
 
-      // Fetch claims matching this provider
-      const claimsRes = await fetch(`/api/claims?provider=${activeProv.id}`, {
-        headers: { 'Authorization': `Bearer ${currentUser.id}` }
-      });
-      const claimsData = await claimsRes.json();
-      setProviderClaims(claimsData);
-
-      // Fetch all member accounts to make clinical patient assignment incredibly smooth
-      const subRes = await fetch('/api/members', {
-        headers: { 'Authorization': `Bearer ${currentUser.id}` }
-      });
-      if (subRes.ok) {
-        const subData = await subRes.json();
-        setPatients(subData);
-        if (subData.length > 0 && !selectedPolicyId) {
-          // Prepopulate with a policy card number
-          setSelectedPolicyId(subData[0].active_policy?.id || '');
-        }
+      if (activeProv) {
+        // Fetch claims for this provider
+        const claimsData = await claimsApi.list({ provider_id: activeProv.id });
+        setProviderClaims(claimsData as unknown as Claim[]);
       }
 
+      // Fetch all members for patient assignment
+      const subData = await membersApi.list();
+      setPatients(subData);
+      if (subData.length > 0 && !selectedPolicyId) {
+        const firstPol = (subData[0] as any)?.policies?.[0]?.id;
+        if (firstPol) setSelectedPolicyId(firstPol);
+      }
     } catch (err) {
       console.error('Error fetching clinician credentials', err);
     } finally {
@@ -99,29 +94,16 @@ export default function ProviderDashboard({ currentUser, onRefreshData }: Provid
     }
 
     try {
-      const res = await fetch('/api/claims', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentUser.id}`
-        },
-        body: JSON.stringify({
-          policy_id: selectedPolicyId,
-          provider_id: activeProvider?.id,
-          diagnosis: claimDiagnosis,
-          treatment: claimTreatment,
-          amount_claimed: Number(claimAmount),
-          document_data: selectedFileName || 'clinic-practitioner-signature.pdf'
-        })
+      await claimsApi.submit({
+        policy_id: selectedPolicyId,
+        provider_id: activeProvider?.id,
+        diagnosis: claimDiagnosis,
+        treatment: claimTreatment,
+        amount_claimed: Number(claimAmount),
+        actorId: currentUser.id,
+        actorName: currentUser.name,
       });
-      const data = await res.json();
-      
-      if (!res.ok) {
-        setFormError(data.error || 'Claim transmission rejected.');
-        return;
-      }
-
-      setFormSuccess(data.message || 'Claim filed successfully for reviewer audit!');
+      setFormSuccess('Claim filed successfully for reviewer audit!');
       setTimeout(() => {
         setShowClaimForm(false);
         setClaimDiagnosis('');
@@ -135,7 +117,7 @@ export default function ProviderDashboard({ currentUser, onRefreshData }: Provid
         fetchProviderData();
       }, 2000);
     } catch (err: any) {
-      setFormError('Failed connecting with OHIMS server: ' + err.message);
+      setFormError('Failed: ' + err.message);
     }
   };
 

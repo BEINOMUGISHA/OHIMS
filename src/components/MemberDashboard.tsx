@@ -43,6 +43,7 @@ import {
 } from 'recharts';
 import { User, Member, Policy, Beneficiary, Premium, Claim, InsurancePlan, Provider } from '../types';
 import MedicalHologramDashboard from './MedicalHologramDashboard';
+import { membersApi, claimsApi, premiumsApi, policiesApi, providersApi, aiApi } from '../lib/api';
 
 interface MemberDashboardProps {
   currentUser: User;
@@ -128,42 +129,29 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
   const fetchProfile = async () => {
     try {
       setLoading(true);
-      // First get the "me" auth endpoint to locate associated member ID
-      const authRes = await fetch('/api/auth/me', {
-        headers: { 'Authorization': `Bearer ${currentUser.id}` }
-      });
-      const meData = await authRes.json();
-      
-      if (meData.member) {
-        // Fetch extended member details
-        const detailsRes = await fetch(`/api/members/${meData.member.id}`, {
-          headers: { 'Authorization': `Bearer ${currentUser.id}` }
-        });
-        const details = await detailsRes.json();
-        setMemberData(details);
+      // Fetch full member profile with nested policies, premiums, beneficiaries
+      const details = await membersApi.get(currentUser.id);
+      setMemberData(details);
 
-        // Prepopulate settings form values
-        if (details.member) {
-          setSettingsAddress(details.member.address || '');
-          setSettingsPhone(details.member.phone || currentUser.phone || '');
-          setSettingsDob(details.member.dob || '');
-          setSettingsGender(details.member.gender || 'male');
-          setSettingsNationalId(details.member.national_id || '');
-          setSettingsPhoto(details.member.photo || '');
-        }
-
-        // Prepopulate claim variables if policy exists
-        if (details.policies && details.policies.length > 0) {
-          setClaimPlanId(details.policies[0].id);
-        }
+      // Prepopulate settings form
+      if (details) {
+        setSettingsAddress((details as any).address || '');
+        setSettingsPhone((details as any).phone || currentUser.phone || '');
+        setSettingsDob((details as any).dob || '');
+        setSettingsGender((details as any).gender || 'male');
+        setSettingsNationalId((details as any).national_id || '');
+        setSettingsPhoto((details as any).avatar_url || '');
       }
 
-      // Also fetch providers for Clinic Finder feature
-      const provRes = await fetch('/api/providers');
-      if (provRes.ok) {
-        const provData = await provRes.json();
-        setProviders(provData);
+      // Prepopulate claim policy id if policy exists
+      const policies = (details as any)?.policies;
+      if (policies && policies.length > 0) {
+        setClaimPlanId(policies[0].id);
       }
+
+      // Fetch providers for Clinic Finder
+      const provData = await providersApi.list();
+      setProviders(provData as unknown as Provider[]);
     } catch (e) {
       console.error('Error fetching member stats', e);
     } finally {
@@ -178,14 +166,9 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
   // Handle premium self payment
   const handlePayPremium = async (premId: string) => {
     try {
-      const res = await fetch(`/api/premiums/${premId}/pay`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${currentUser.id}` }
-      });
-      if (res.ok) {
-        onRefreshData();
-        fetchProfile();
-      }
+      await premiumsApi.pay(premId, currentUser.id, currentUser.name);
+      onRefreshData();
+      fetchProfile();
     } catch (err) {
       console.error(err);
     }
@@ -197,21 +180,12 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
       setRenewLoading(true);
       setRenewError('');
       setRenewSuccess('');
-      const res = await fetch(`/api/policies/${policyId}/renew`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${currentUser.id}` }
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setRenewSuccess(data.message || 'Policy renewed successfully with renewal premium installment generated!');
-        onRefreshData();
-        fetchProfile();
-      } else {
-        setRenewError(data.error || 'Failed to renew policy');
-      }
-    } catch (err) {
-      console.error(err);
-      setRenewError('Core communications failure during renewal sequence');
+      await policiesApi.renew(policyId, currentUser.id, currentUser.name);
+      setRenewSuccess('Policy renewed successfully with renewal premium installment generated!');
+      onRefreshData();
+      fetchProfile();
+    } catch (err: any) {
+      setRenewError(err.message || 'Core communications failure during renewal sequence');
     } finally {
       setRenewLoading(false);
     }
@@ -229,27 +203,15 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
     }
 
     try {
-      const res = await fetch('/api/claims', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentUser.id}`
-        },
-        body: JSON.stringify({
-          policy_id: claimPlanId,
-          diagnosis: claimDiagnosis,
-          treatment: claimTreatment,
-          amount_claimed: Number(claimAmount),
-          document_data: claimSupportDoc ? 'custom-receipt-upload.pdf' : null
-        })
+      await claimsApi.submit({
+        policy_id: claimPlanId,
+        diagnosis: claimDiagnosis,
+        treatment: claimTreatment,
+        amount_claimed: Number(claimAmount),
+        actorId: currentUser.id,
+        actorName: currentUser.name,
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setClaimError(data.error || 'Claim filing rejected');
-        return;
-      }
-      setClaimSuccess(data.message || 'Claim filed successfully!');
-      
+      setClaimSuccess('Claim filed successfully and sent for review!');
       setTimeout(() => {
         setShowClaimForm(false);
         setClaimDiagnosis('');
@@ -276,19 +238,13 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
     }
 
     try {
-      const res = await fetch(`/api/members/${memberData.member.id}/beneficiary`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentUser.id}`
-        },
-        body: JSON.stringify({ name: benName, relationship: benRelation, dob: benDob })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setBenError(data.error);
-        return;
-      }
+      const policyId = (memberData as any)?.policies?.[0]?.id;
+      if (!policyId) { setBenError('No active policy found.'); return; }
+      await membersApi.addBeneficiary(
+        policyId,
+        { name: benName, relationship: benRelation, dob: benDob },
+        currentUser.name
+      );
       setBenSuccess('Beneficiary registered under active policy benefits!');
       setTimeout(() => {
         setShowBenForm(false);
@@ -304,26 +260,13 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
 
   // Delete Beneficiary
   const handleDeleteBeneficiary = async (benId: string) => {
-    if (!window.confirm('Are you sure you want to remove this beneficiary from your policy benefits?')) {
-      return;
-    }
-
+    if (!window.confirm('Are you sure you want to remove this beneficiary from your policy benefits?')) return;
     try {
-      const res = await fetch(`/api/members/${memberData.member.id}/beneficiary/${benId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${currentUser.id}`
-        }
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || 'Failed to remove beneficiary');
-        return;
-      }
+      await membersApi.deleteBeneficiary(benId, currentUser.name);
       onRefreshData();
       fetchProfile();
     } catch (err: any) {
-      alert('Failed to connect to server: ' + err.message);
+      alert('Failed to remove beneficiary: ' + err.message);
     }
   };
 
@@ -332,27 +275,17 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
     e.preventDefault();
     setSettingsError('');
     setSettingsSuccess('');
-
     try {
-      const res = await fetch(`/api/members/${memberData.member.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentUser.id}`
-        },
-        body: JSON.stringify({
-          national_id: settingsNationalId,
-          dob: settingsDob,
-          gender: settingsGender,
-          address: settingsAddress,
-          photo: settingsPhoto
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setSettingsError(data.error || 'Failed to update profile');
-        return;
-      }
+      const { supabase } = await import('../lib/supabase');
+      const { error } = await supabase.from('profiles').update({
+        national_id: settingsNationalId,
+        dob: settingsDob,
+        gender: settingsGender,
+        address: settingsAddress,
+        avatar_url: settingsPhoto,
+        phone: settingsPhone,
+      }).eq('id', currentUser.id);
+      if (error) { setSettingsError(error.message); return; }
       setSettingsSuccess('Profile details recorded successfully!');
       onRefreshData();
       fetchProfile();
@@ -373,26 +306,11 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
     setAiLoading(true);
 
     try {
-      const res = await fetch('/api/ai/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentUser.id}`
-        },
-        body: JSON.stringify({
-          message: userMsg,
-          history: aiMessages.slice(1).map(m => ({
-            role: m.role,
-            content: m.content
-          }))
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setAiMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error communicating with my AI brain: ' + (data.error || 'Unknown error') }]);
-        return;
-      }
-      setAiMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
+      const reply = await aiApi.chat(
+        userMsg,
+        aiMessages.slice(1).map(m => ({ role: m.role, content: m.content }))
+      );
+      setAiMessages(prev => [...prev, { role: 'assistant', content: reply }]);
     } catch (err: any) {
       setAiMessages(prev => [...prev, { role: 'assistant', content: 'Connection failed: ' + err.message }]);
     } finally {

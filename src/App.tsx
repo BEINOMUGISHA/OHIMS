@@ -1,6 +1,10 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * OHIMS Uganda — App Root
+ * All auth + data operations now go through src/lib/api.ts (Supabase-native).
+ * No Express server required — works fully on GitHub Pages.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -12,6 +16,13 @@ import StaffDashboard from './components/StaffDashboard';
 import ProviderDashboard from './components/ProviderDashboard';
 import { User, Notification, InsurancePlan } from './types';
 import { RefreshCw, ShieldCheck } from 'lucide-react';
+import { supabase } from './lib/supabase';
+import {
+  plansApi,
+  usersApi,
+  notificationsApi,
+  authApi,
+} from './lib/api';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -39,158 +50,139 @@ export default function App() {
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
   };
 
-  // Load general platform lookup values (Plans and Sandbox Swapping users list)
+  // Load general platform lookup values
   const loadPlatformData = async () => {
     try {
-      const plansRes = await fetch('/api/plans');
-      if (plansRes.ok) {
-        const plansData = await plansRes.json();
-        setPlans(plansData);
-      }
-
-      const usersRes = await fetch('/api/users');
-      if (usersRes.ok) {
-        const usersData = await usersRes.json();
-        setAllUsers(usersData);
-      }
+      const [plansData, usersData] = await Promise.all([
+        plansApi.list(),
+        usersApi.list(),
+      ]);
+      setPlans(plansData as unknown as InsurancePlan[]);
+      setAllUsers(usersData as unknown as User[]);
     } catch (e) {
       console.error('Error fetching baseline platform data:', e);
     }
   };
 
-  // Fetch the active profile for the currently stored authorization token
-  const fetchActiveProfile = async (token: string) => {
+  // Fetch notifications for the current user
+  const fetchNotifications = async (userId: string) => {
     try {
-      const res = await fetch('/api/auth/me', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setCurrentUser(data.user);
-        
-        // Save to localStorage
-        localStorage.setItem('ohims_auth_token', token);
-        
-        // Fetch matching inbox notifications
-        fetchNotifications(token);
-      } else {
-        // Stale or expired token
-        handleLogout();
-      }
-    } catch (e) {
-      console.error('Failed to resolve authenticated session:', e);
-      handleLogout();
-    }
-  };
-
-  // Fetch notifications for active logged-in user index
-  const fetchNotifications = async (token: string) => {
-    try {
-      const res = await fetch('/api/notifications', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setNotifications(data);
-      }
+      const data = await notificationsApi.list(userId);
+      setNotifications(data as unknown as Notification[]);
     } catch (e) {
       console.error('Failed to sync in-app notifications:', e);
     }
   };
 
-  // Mark single notification read
-  const handleMarkNotificationRead = async (id: string) => {
-    const token = localStorage.getItem('ohims_auth_token');
-    if (!token) return;
-
+  // Restore session from Supabase Auth session
+  const restoreSession = async () => {
     try {
-      const res = await fetch(`/api/notifications/${id}/read`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        // Simple client side optimization or refetch
-        setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+      const profile = await authApi.getMe();
+      if (profile) {
+        setCurrentUser(profile as unknown as User);
+        fetchNotifications(profile.id);
       }
+    } catch (e) {
+      console.error('Failed to restore session:', e);
+    }
+  };
+
+  // Called after login success — userId is the Supabase user id
+  const handleLoginSuccess = async (userId: string) => {
+    setLoading(true);
+    await restoreSession();
+    setLoading(false);
+  };
+
+  // Handle sandbox user switcher
+  const handleUserSwap = async (userId: string) => {
+    setLoading(true);
+    // Sign in as that user is not possible without password from client-side.
+    // Instead, just load profile directly for demo sandbox display.
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+      if (profile) {
+        setCurrentUser(profile as unknown as User);
+        fetchNotifications(profile.id);
+      }
+    } catch (e) {
+      console.error('User swap failed:', e);
+    }
+    setLoading(false);
+  };
+
+  // Mark single notification as read
+  const handleMarkNotificationRead = async (id: string) => {
+    try {
+      await notificationsApi.markRead(id);
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
     } catch (e) {
       console.error('Failed to dismiss notification:', e);
     }
   };
 
-  // Clear all inbox alerts
+  // Clear all notifications
   const handleClearAllNotifications = async () => {
-    const token = localStorage.getItem('ohims_auth_token');
-    if (!token) return;
-
+    if (!currentUser) return;
     try {
-      const res = await fetch('/api/notifications/clear-all', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-      }
+      await notificationsApi.clearAll(currentUser.id);
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     } catch (e) {
       console.error('Failed to empty notification drawer:', e);
     }
   };
 
-  // Handle manual/sandbox user selection
-  const handleUserSwap = async (tokenId: string) => {
-    setLoading(true);
-    await fetchActiveProfile(tokenId);
-    setLoading(false);
-  };
-
-  // Direct login success trigger from auth modal
-  const handleLoginSuccess = async (token: string) => {
-    setLoading(true);
-    await fetchActiveProfile(token);
-    setLoading(false);
-  };
-
-  // Logout cleanups
-  const handleLogout = () => {
-    localStorage.removeItem('ohims_auth_token');
+  // Logout
+  const handleLogout = async () => {
+    await authApi.logout();
     setCurrentUser(null);
     setNotifications([]);
   };
 
-  // Central callback to refresh any lists/state modified inside child components
+  // Refresh data after actions
   const handleRefreshAllData = () => {
-    const token = localStorage.getItem('ohims_auth_token');
-    if (token) {
-      fetchNotifications(token);
-      // Also potentially reload profiles or users
+    if (currentUser) {
+      fetchNotifications(currentUser.id);
       loadPlatformData();
     }
   };
 
-  // Bootstrap session checks
+  // Bootstrap on load — check Supabase session
   useEffect(() => {
     const initApp = async () => {
       setLoading(true);
       await loadPlatformData();
-      
-      const storedToken = localStorage.getItem('ohims_auth_token');
-      if (storedToken) {
-        await fetchActiveProfile(storedToken);
-      }
+      await restoreSession();
       setLoading(false);
     };
 
     initApp();
+
+    // Listen to Supabase auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === 'SIGNED_IN' && session) {
+          await restoreSession();
+        } else if (event === 'SIGNED_OUT') {
+          setCurrentUser(null);
+          setNotifications([]);
+        }
+      }
+    );
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  // Poll for notifications if a user session exists (Module 8: real-time feedback alignment)
+  // Poll notifications every 10 seconds when logged in
   useEffect(() => {
-    const loggedToken = localStorage.getItem('ohims_auth_token');
-    if (!loggedToken) return;
-
+    if (!currentUser) return;
     const interval = setInterval(() => {
-      fetchNotifications(loggedToken);
-    }, 8000); // Poll every 8 seconds for responsive demo feedback
-
+      fetchNotifications(currentUser.id);
+    }, 10000);
     return () => clearInterval(interval);
   }, [currentUser]);
 
@@ -208,7 +200,7 @@ export default function App() {
         </div>
         <div className="flex items-center space-x-2 text-xs text-gray-400">
           <RefreshCw className="h-4 w-4 animate-spin text-[#0D9488]" />
-          <span>Synchronizing baseline registry datasets & policyholder sessions...</span>
+          <span>Synchronizing baseline registry datasets &amp; policyholder sessions...</span>
         </div>
       </div>
     );
@@ -255,7 +247,7 @@ export default function App() {
         )}
       </main>
 
-      {/* Pop-up modal triggers for authentication gating */}
+      {/* Auth Modal */}
       {showAuthModal && (
         <AuthModal
           plans={plans}

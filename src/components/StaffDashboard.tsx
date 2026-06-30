@@ -25,6 +25,9 @@ import {
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { User, Claim, Policy, Premium } from '../types';
+import {
+  claimsApi, policiesApi, premiumsApi, providersApi, plansApi, settingsApi, auditApi
+} from '../lib/api';
 
 interface StaffDashboardProps {
   currentUser: User;
@@ -83,58 +86,30 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
   const fetchStaffData = async () => {
     try {
       setLoading(true);
-      
-      const claimsRes = await fetch('/api/claims', {
-        headers: { 'Authorization': `Bearer ${currentUser.id}` }
-      });
-      const claimsData = await claimsRes.json();
-      setClaims(claimsData);
 
-      const polRes = await fetch('/api/policies', {
-        headers: { 'Authorization': `Bearer ${currentUser.id}` }
-      });
-      const polData = await polRes.json();
+      const [claimsData, polData, premData, provData, plansData, settingsData, logsData] =
+        await Promise.all([
+          claimsApi.list(),
+          policiesApi.list(),
+          premiumsApi.list(),
+          providersApi.list(),
+          plansApi.list(),
+          settingsApi.get(),
+          auditApi.list(),
+        ]);
+
+      setClaims(claimsData as unknown as Claim[]);
       setPolicies(polData);
-
-      const premRes = await fetch('/api/premiums', {
-        headers: { 'Authorization': `Bearer ${currentUser.id}` }
-      });
-      const premData = await premRes.json();
       setPremiums(premData);
+      setProviders(provData);
+      setPlans(plansData);
+      setAuditLogs(logsData);
 
-      const provRes = await fetch('/api/providers', {
-        headers: { 'Authorization': `Bearer ${currentUser.id}` }
-      });
-      if (provRes.ok) {
-        setProviders(await provRes.json());
-      }
-
-      const plansRes = await fetch('/api/plans', {
-        headers: { 'Authorization': `Bearer ${currentUser.id}` }
-      });
-      if (plansRes.ok) {
-        setPlans(await plansRes.json());
-      }
-
-      const settingsRes = await fetch('/api/settings', {
-        headers: { 'Authorization': `Bearer ${currentUser.id}` }
-      });
-      if (settingsRes.ok) {
-        const s = await settingsRes.json();
-        setSettingsAllowAuto(s.allowAutoApprovalOfLowClaims);
-        setSettingsThreshold(s.lowClaimThreshold.toString());
-        setSettingsSlaDays(s.autoSlaDays.toString());
-        setSettingsRequireAccreditation(s.requireProviderAccreditation);
-        setSettingsAllowSelfSubmit(s.allowSelfClaimSubmission);
-      }
-
-      const logsRes = await fetch('/api/audit-logs', {
-        headers: { 'Authorization': `Bearer ${currentUser.id}` }
-      });
-      if (logsRes.ok) {
-        setAuditLogs(await logsRes.json());
-      }
-
+      setSettingsAllowAuto(settingsData.allowAutoApprovalOfLowClaims);
+      setSettingsThreshold(settingsData.lowClaimThreshold.toString());
+      setSettingsSlaDays(settingsData.autoSlaDays.toString());
+      setSettingsRequireAccreditation(settingsData.requireProviderAccreditation);
+      setSettingsAllowSelfSubmit(settingsData.allowSelfClaimSubmission);
     } catch (e) {
       console.error('Error loading adjuster logs', e);
     } finally {
@@ -158,26 +133,12 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
     }
 
     try {
-      const res = await fetch(`/api/claims/${selectedClaim.id}/review`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentUser.id}`
-        },
-        body: JSON.stringify({
-          status,
-          amount_approved: amt,
-          notes: reviewNotes,
-          is_flagged: false // clear duplicate or suspicious flag upon manual review
-        })
-      });
-
-      if (!res.ok) {
-        const d = await res.json();
-        setReviewError(d.error || 'Review submission refused.');
-        return;
-      }
-
+      await claimsApi.review(
+        selectedClaim.id,
+        { status, amount_approved: amt, notes: reviewNotes },
+        currentUser.id,
+        currentUser.name
+      );
       setSelectedClaim(null);
       setApprovedAmount('');
       setReviewNotes('');
@@ -191,99 +152,52 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
   // Dispatch Direct Payout
   const handleDisbursePayout = async (claimId: string) => {
     try {
-      const res = await fetch(`/api/claims/${claimId}/pay`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${currentUser.id}` }
-      });
-      if (res.ok) {
-        onRefreshData();
-        fetchStaffData();
-      }
+      await claimsApi.pay(claimId, currentUser.id, currentUser.name);
+      onRefreshData();
+      fetchStaffData();
     } catch (err) {
       console.error(err);
     }
   };
 
-  // Update Policy conditions on-the-fly (Module 3)
+  // Update Policy status
   const handleTogglePolicyStatus = async (policyId: string, currentStatus: string) => {
     const nextStatus = currentStatus === 'active' ? 'suspended' : 'active';
     try {
-      const res = await fetch(`/api/policies/${policyId}/status`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentUser.id}`
-        },
-        body: JSON.stringify({ status: nextStatus })
-      });
-      if (res.ok) {
-        onRefreshData();
-        fetchStaffData();
-      }
-    } catch (err) {
-      console.error(err);
-    }
+      await policiesApi.updateStatus(policyId, nextStatus, currentUser.id, currentUser.name);
+      onRefreshData();
+      fetchStaffData();
+    } catch (err) { console.error(err); }
   };
 
-  // Terminate policy forever (Module 3)
+  // Terminate policy
   const handleTerminatePolicy = async (policyId: string) => {
     if (!window.confirm('Are you absolutely sure you want to TERMINATE this user policy? This completely revokes healthcare diagnostic coverage.')) return;
     try {
-      const res = await fetch(`/api/policies/${policyId}/status`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentUser.id}`
-        },
-        body: JSON.stringify({ status: 'terminated' })
-      });
-      if (res.ok) {
-        onRefreshData();
-        fetchStaffData();
-      }
-    } catch (err) {
-      console.error(err);
-    }
+      await policiesApi.updateStatus(policyId, 'cancelled', currentUser.id, currentUser.name);
+      onRefreshData();
+      fetchStaffData();
+    } catch (err) { console.error(err); }
   };
 
   // Trigger Bulk Premium Reminders
   const handleBroadcastReminders = async () => {
     try {
-      const res = await fetch('/api/premiums/remind', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${currentUser.id}` }
-      });
-      if (res.ok) {
-        const d = await res.json();
-        alert(`SLA automation successful! Dispatched ${d.count} notification reminders.`);
-        onRefreshData();
-        fetchStaffData();
-      }
-    } catch (err) {
-      console.error(err);
-    }
+      const d = await premiumsApi.sendReminders(currentUser.id, currentUser.name);
+      alert(`SLA automation successful! Dispatched ${d.reminders_sent} notification reminders.`);
+      onRefreshData();
+      fetchStaffData();
+    } catch (err) { console.error(err); }
   };
 
   // Toggle Provider Accreditation
   const handleToggleProviderAccreditation = async (id: string, status: 'accredited' | 'suspended') => {
     try {
-      const res = await fetch(`/api/providers/${id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentUser.id}`
-        },
-        body: JSON.stringify({ accreditation_status: status })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || 'Failed to update accreditation');
-        return;
-      }
+      await providersApi.update(id, { accreditation_status: status }, currentUser.id, currentUser.name);
       fetchStaffData();
       onRefreshData();
     } catch (err: any) {
-      alert('Failed to connect to server: ' + err.message);
+      alert('Failed to update accreditation: ' + err.message);
     }
   };
 
@@ -292,33 +206,19 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
     e.preventDefault();
     setProviderError('');
     setProviderSuccess('');
-
     if (!providerName || !providerLocation || !providerContact) {
       setProviderError('Please fill out Name, Location, and Contact details.');
       return;
     }
-
     try {
-      const res = await fetch('/api/providers', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentUser.id}`
-        },
-        body: JSON.stringify({
-          name: providerName,
-          type: providerType,
-          location: providerLocation,
-          contact: providerContact,
-          approved_plans: ['plan-basic', 'plan-standard', 'plan-premium']
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setProviderError(data.error || 'Failed to register provider');
-        return;
-      }
-      setProviderSuccess('Clinic partner registered successfully under review!');
+      await providersApi.create({
+        name: providerName,
+        type: providerType,
+        location: providerLocation,
+        contact: providerContact,
+        approved_plans: ['plan-basic', 'plan-standard', 'plan-premium'],
+      }, currentUser.id, currentUser.name);
+      setProviderSuccess('Clinic partner registered successfully!');
       setProviderName('');
       setProviderLocation('');
       setProviderContact('');
@@ -327,7 +227,7 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
       onRefreshData();
       setTimeout(() => setProviderSuccess(''), 3000);
     } catch (err: any) {
-      setProviderError('Connection failed: ' + err.message);
+      setProviderError('Failed: ' + err.message);
     }
   };
 
@@ -336,33 +236,20 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
     e.preventDefault();
     setSettingsError('');
     setSettingsSuccess('');
-
     try {
-      const res = await fetch('/api/settings', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentUser.id}`
-        },
-        body: JSON.stringify({
-          allowAutoApprovalOfLowClaims: settingsAllowAuto,
-          lowClaimThreshold: Number(settingsThreshold),
-          autoSlaDays: Number(settingsSlaDays),
-          requireProviderAccreditation: settingsRequireAccreditation,
-          allowSelfClaimSubmission: settingsAllowSelfSubmit
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setSettingsError(data.error || 'Failed to update settings');
-        return;
-      }
+      await settingsApi.update({
+        allowAutoApprovalOfLowClaims: settingsAllowAuto,
+        lowClaimThreshold: Number(settingsThreshold),
+        autoSlaDays: Number(settingsSlaDays),
+        requireProviderAccreditation: settingsRequireAccreditation,
+        allowSelfClaimSubmission: settingsAllowSelfSubmit,
+      }, currentUser.id, currentUser.name);
       setSettingsSuccess('System configuration parameters saved.');
       fetchStaffData();
       onRefreshData();
       setTimeout(() => setSettingsSuccess(''), 3000);
     } catch (err: any) {
-      setSettingsError('Connection failed: ' + err.message);
+      setSettingsError('Failed: ' + err.message);
     }
   };
 

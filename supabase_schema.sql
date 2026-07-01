@@ -7,12 +7,39 @@
 
 -- Enable UUID extension
 create extension if not exists "uuid-ossp";
+create extension if not exists pgcrypto;
+
+-- =====================================================================
+-- CLEANUP PREVIOUS SCHEMAS (Drop view / table / function cascade)
+-- =====================================================================
+drop view if exists public.vw_outstanding_premiums cascade;
+drop view if exists public.vw_claims_full cascade;
+drop view if exists public.vw_active_policies cascade;
+
+drop table if exists public.audit_logs cascade;
+drop table if exists public.system_settings cascade;
+drop table if exists public.premiums cascade;
+drop table if exists public.notifications cascade;
+drop table if exists public.claims cascade;
+drop table if exists public.beneficiaries cascade;
+drop table if exists public.policies cascade;
+drop table if exists public.providers cascade;
+drop table if exists public.plans cascade;
+drop table if exists public.profiles cascade;
+
+drop function if exists public.fn_set_updated_at() cascade;
+drop function if exists public.fn_handle_new_user() cascade;
+drop function if exists public.fn_audit_policy_change() cascade;
+drop function if exists public.fn_audit_claim_change() cascade;
+drop function if exists public.fn_deduct_coverage_on_claim() cascade;
+drop function if exists public.fn_auth_role() cascade;
+drop function if exists public.seed_auth_user(uuid, text, text, text, text) cascade;
 
 -- =====================================================================
 -- TABLE 1: PROFILES  (extends auth.users)
 -- =====================================================================
 create table public.profiles (
-    id              uuid primary key,
+    id              uuid primary key references auth.users(id) on delete cascade,
     email           text not null unique,
     name            text not null,
     role            text not null check (role in ('member','provider','staff')),
@@ -68,7 +95,7 @@ create table public.policies (
     user_id             uuid references public.profiles(id) on delete cascade not null,
     plan_id             text references public.plans(id) not null,
     status              text not null default 'active'
-                            check (status in ('active','suspended','cancelled')),
+                            check (status in ('active','suspended','terminated','cancelled')),
     start_date          date not null default current_date,
     end_date            date not null,
     premium_rate        numeric not null check (premium_rate >= 0),
@@ -344,6 +371,8 @@ create policy "policies: staff provider read all" on public.policies
     for select using (public.fn_auth_role() in ('staff','provider'));
 create policy "policies: staff manage" on public.policies
     for all using (public.fn_auth_role() = 'staff');
+create policy "policies: member insert" on public.policies
+    for insert with check (auth.uid() = user_id);
 create policy "policies: public insert" on public.policies
     for insert with check (true);
 
@@ -497,9 +526,10 @@ on conflict (id) do nothing;
 -- =====================================================================
 -- SEED DATA: Sample Accredited Healthcare Providers
 -- =====================================================================
-insert into public.providers (name, type, location, contact, accreditation_status, approved_plans)
+insert into public.providers (id, name, type, location, contact, accreditation_status, approved_plans)
 values
 (
+    'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid,
     'Mulago National Referral Hospital',
     'hospital',
     'Mulago Hill, Kampala',
@@ -508,6 +538,7 @@ values
     array['plan-basic','plan-standard','plan-premium']
 ),
 (
+    'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12'::uuid,
     'Case Medical Centre',
     'hospital',
     'Nakasero, Kampala',
@@ -516,6 +547,7 @@ values
     array['plan-standard','plan-premium']
 ),
 (
+    'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a13'::uuid,
     'International Hospital Kampala (IHK)',
     'hospital',
     'Namuwongo, Kampala',
@@ -524,6 +556,7 @@ values
     array['plan-premium']
 ),
 (
+    'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a14'::uuid,
     'Norvik Enterprises Laboratory',
     'lab',
     'Ntinda, Kampala',
@@ -532,6 +565,7 @@ values
     array['plan-basic','plan-standard','plan-premium']
 ),
 (
+    'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a15'::uuid,
     'Kampala Pharmacy Hub',
     'pharmacy',
     'Wandegeya, Kampala',
@@ -539,7 +573,169 @@ values
     'pending',
     array['plan-basic']
 )
-on conflict do nothing;
+on conflict (id) do nothing;
+
+-- =====================================================================
+-- SEED DATA: Sandbox Demo Accounts (Supabase Auth Users & Profiles)
+-- =====================================================================
+
+-- Helper function to seed Auth Users securely with hashed passwords
+create or replace function public.seed_auth_user(
+    u_id uuid,
+    u_email text,
+    u_password text,
+    u_name text,
+    u_role text
+) returns void language plpgsql security definer as $$
+begin
+    if not exists (select 1 from auth.users where email = u_email) then
+        insert into auth.users (
+            id,
+            instance_id,
+            email,
+            encrypted_password,
+            email_confirmed_at,
+            raw_app_meta_data,
+            raw_user_meta_data,
+            created_at,
+            updated_at,
+            role,
+            aud,
+            confirmed_at
+        ) values (
+            u_id,
+            '00000000-0000-0000-0000-000000000000'::uuid,
+            u_email,
+            crypt(u_password, gen_salt('bf', 10)),
+            now(),
+            '{"provider": "email", "providers": ["email"]}'::jsonb,
+            jsonb_build_object('name', u_name, 'role', u_role),
+            now(),
+            now(),
+            'authenticated',
+            'authenticated',
+            now()
+        );
+    end if;
+end;
+$$;
+
+-- Seed sandbox accounts in auth.users (which triggers profiles auto-creation)
+select public.seed_auth_user('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid, 'admin@ohims.gov.ug', 'admin123', 'System Administrator', 'staff');
+select public.seed_auth_user('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12'::uuid, 'staff@ohims.gov.ug', 'staff123', 'Staff Adjuster', 'staff');
+select public.seed_auth_user('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a13'::uuid, 'mulago@ohims.gov.ug', 'provider123', 'Mulago Partner', 'provider');
+select public.seed_auth_user('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a14'::uuid, 'beinomugishainnocent2001@gmail.com', 'member123', 'Beinomugisha Innocent', 'member');
+select public.seed_auth_user('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a15'::uuid, 'member@ohims.gov.ug', 'member123', 'Demo Member', 'member');
+
+-- Enrich profiles table with profile details
+update public.profiles
+set phone = '+256414540131', gender = 'male', dob = '1985-01-01', address = 'Kampala'
+where id = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a13'::uuid;
+
+update public.profiles
+set phone = '+256755949229', national_id = 'CM01037AGV2G', dob = '1998-05-15', gender = 'male', address = 'Kabale'
+where id = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a14'::uuid;
+
+update public.profiles
+set phone = '+256700111222', national_id = 'CM02047ZGV4G', dob = '1995-10-12', gender = 'female', address = 'Kampala'
+where id = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a15'::uuid;
+
+-- Clean up helper function
+drop function if exists public.seed_auth_user(uuid, text, text, text, text);
+
+-- =====================================================================
+-- SEED DATA: Seed active policies, premiums, claims, and notifications
+-- =====================================================================
+
+-- 1. Policies
+insert into public.policies (id, user_id, plan_id, status, start_date, end_date, premium_rate, coverage_limit, remaining_coverage)
+values
+(
+    'POL-2026-99999',
+    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a14'::uuid,
+    'plan-basic',
+    'active',
+    '2026-06-30',
+    '2027-06-30',
+    45000,
+    5000000,
+    4820000 -- reflecting deducted approved claim (5,000,000 - 180,000)
+),
+(
+    'POL-2026-11111',
+    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a15'::uuid,
+    'plan-standard',
+    'active',
+    '2026-06-30',
+    '2027-06-30',
+    95000,
+    15000000,
+    15000000
+)
+on conflict (id) do nothing;
+
+-- 2. Premiums
+insert into public.premiums (id, policy_id, amount, status, due_date)
+values
+(
+    'e0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid,
+    'POL-2026-99999',
+    45000,
+    'unpaid',
+    '2026-07-30'
+),
+(
+    'e0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12'::uuid,
+    'POL-2026-11111',
+    95000,
+    'unpaid',
+    '2026-07-30'
+)
+on conflict (id) do nothing;
+
+-- 3. Claims
+insert into public.claims (id, policy_id, provider_id, diagnosis, treatment, amount_claimed, amount_approved, status, date_filed, review_notes)
+values
+(
+    'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid,
+    'POL-2026-99999',
+    'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid,
+    'Malaria Fever Checkup & Infusion',
+    'General Outpatient consultation and medication',
+    180000,
+    180000,
+    'approved',
+    now() - interval '5 days',
+    'Low claim threshold auto-approval'
+),
+(
+    'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12'::uuid,
+    'POL-2026-99999',
+    'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a14'::uuid,
+    'Regular Routine Eye Refraction Lens',
+    'Eye screening and prescription spectacles',
+    650000,
+    0,
+    'submitted',
+    now() - interval '1 day'
+)
+on conflict (id) do nothing;
+
+-- 4. Notifications
+insert into public.notifications (user_id, message, type, read)
+values
+(
+    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a14'::uuid,
+    'Your claim for Malaria Fever Checkup & Infusion has been approved for UGX 180,000.',
+    'success',
+    false
+),
+(
+    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a14'::uuid,
+    'Premium invoice generated for policy POL-2026-99999. Due on 2026-07-30.',
+    'info',
+    true
+);
 
 -- =====================================================================
 -- USEFUL VIEWS FOR REPORTING

@@ -71,78 +71,38 @@ export const authApi = {
       dob, gender, address, selected_plan_id, premium_frequency,
     } = payload;
 
-    // 1. Create Supabase Auth user (email confirmation must be OFF in dashboard)
+    // 1. Create Supabase Auth user, passing all onboarding details in metadata options
     const { data: authData, error: authErr } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { name, role: 'member' } },
+      options: {
+        data: {
+          name,
+          role: 'member',
+          phone,
+          national_id,
+          dob,
+          gender,
+          address,
+          selected_plan_id,
+          premium_frequency,
+        }
+      },
     });
     if (authErr) throw new Error(authErr.message);
     const userId = authData.user!.id;
 
-    // 2. Upsert profile (the trigger fn_handle_new_user creates a minimal row;
-    //    we upsert the full data here)
-    const { error: profErr } = await supabase.from('profiles').upsert({
-      id: userId, email, name, role: 'member',
-      national_id, dob, gender, address, phone,
-    });
-    if (profErr) throw new Error(`Profile: ${profErr.message}`);
+    // 2. Wait a brief moment to ensure trigger fn_handle_new_user completes execution
+    await new Promise(resolve => setTimeout(resolve, 600));
 
-    // 3. Fetch plan details
-    const { data: plan, error: planErr } = await supabase
-      .from('plans')
-      .select('*')
-      .eq('id', selected_plan_id)
-      .single();
-    if (planErr || !plan) throw new Error('Selected plan not found');
-
-    // 4. Create policy
-    const policyId = generatePolicyId();
-    const startDate = new Date();
-    const endDate = new Date(startDate);
-    endDate.setFullYear(endDate.getFullYear() + 1);
-
-    const { error: polErr } = await supabase.from('policies').insert({
-      id: policyId,
-      user_id: userId,
-      plan_id: selected_plan_id,
-      status: 'active',
-      start_date: startDate.toISOString().split('T')[0],
-      end_date: endDate.toISOString().split('T')[0],
-      premium_rate: plan.premium_amount,
-      coverage_limit: plan.coverage_limit,
-      remaining_coverage: plan.coverage_limit,
-    });
-    if (polErr) throw new Error(`Policy: ${polErr.message}`);
-
-    // 5. Create first premium invoice
-    const premDue = new Date();
-    premDue.setDate(premDue.getDate() + 30);
-    await supabase.from('premiums').insert({
-      policy_id: policyId,
-      amount: plan.premium_amount,
-      status: 'unpaid',
-      due_date: premDue.toISOString().split('T')[0],
-    });
-
-    // 6. Welcome notification
-    await addNotification(
-      userId,
-      `Welcome to OHIMS Uganda, ${name}! Your policy ${policyId} is now active under the ${plan.name} plan.`,
-      'success'
-    );
-
-    // 7. Audit
-    await writeAudit(userId, name, 'MEMBER_REGISTERED', 'profiles', userId);
-
-    // 8. Return the full profile (same shape as old Express response)
+    // 3. Return the full profile (created automatically by the secure database trigger)
     const { data: profile } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', userId)
       .single();
 
-    return { user: profile };
+    return { user: profile || { id: userId, name, email, role: 'member' } };
   },
 
   /**

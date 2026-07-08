@@ -237,14 +237,93 @@ create trigger trg_settings_updated_at   before update on public.system_settings
 -- =====================================================================
 create or replace function public.fn_handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
+declare
+    v_name text;
+    v_role text;
+    v_plan_id text;
+    v_phone text;
+    v_national_id text;
+    v_dob date;
+    v_gender text;
+    v_address text;
+    v_plan_premium numeric;
+    v_plan_limit numeric;
+    v_policy_id text;
+    v_start_date date;
+    v_end_date date;
+    v_prem_due date;
 begin
-    insert into public.profiles (id, email, name, role)
-    values (
-        new.id,
-        new.email,
-        coalesce(new.raw_user_meta_data->>'name', split_part(new.email, '@', 1)),
-        coalesce(new.raw_user_meta_data->>'role', 'member')
+    -- Extract metadata from raw_user_meta_data
+    v_name := coalesce(new.raw_user_meta_data->>'name', split_part(new.email, '@', 1));
+    v_role := coalesce(new.raw_user_meta_data->>'role', 'member');
+    v_phone := new.raw_user_meta_data->>'phone';
+    v_national_id := new.raw_user_meta_data->>'national_id';
+    
+    if new.raw_user_meta_data->>'dob' is not null and new.raw_user_meta_data->>'dob' <> '' then
+        v_dob := (new.raw_user_meta_data->>'dob')::date;
+    else
+        v_dob := null;
+    end if;
+    
+    v_gender := new.raw_user_meta_data->>'gender';
+    v_address := new.raw_user_meta_data->>'address';
+    v_plan_id := new.raw_user_meta_data->>'selected_plan_id';
+
+    -- 1. Insert Profile
+    insert into public.profiles (
+        id, email, name, role, phone, national_id, dob, gender, address
+    ) values (
+        new.id, new.email, v_name, v_role, v_phone, v_national_id, v_dob, v_gender, v_address
     );
+
+    -- 2. If it is a member and a plan was selected, create their policy & premium automatically
+    if v_role = 'member' and v_plan_id is not null then
+        -- Get plan details safely
+        select premium_amount, coverage_limit into v_plan_premium, v_plan_limit
+        from public.plans where id = v_plan_id;
+
+        if v_plan_premium is not null then
+            -- Generate Policy ID (POL-YYYY-RANDOM)
+            v_policy_id := 'POL-' || to_char(now(), 'YYYY') || '-' || floor(random() * 90000 + 10000)::text;
+            v_start_date := current_date;
+            v_end_date := current_date + interval '1 year';
+
+            -- Create Policy
+            insert into public.policies (
+                id, user_id, plan_id, status, start_date, end_date, premium_rate, coverage_limit, remaining_coverage
+            ) values (
+                v_policy_id, new.id, v_plan_id, 'active', v_start_date, v_end_date, v_plan_premium, v_plan_limit, v_plan_limit
+            );
+
+            -- Create First Premium Invoice
+            v_prem_due := current_date + interval '30 days';
+            insert into public.premiums (
+                policy_id, amount, status, due_date
+            ) values (
+                v_policy_id, v_plan_premium, 'unpaid', v_prem_due
+            );
+
+            -- Create welcome notification
+            insert into public.notifications (user_id, message, type, read)
+            values (
+                new.id,
+                'Welcome to OHIMS Uganda! Your policy ' || v_policy_id || ' is now active under the selected plan.',
+                'success',
+                false
+            );
+
+            -- Audit log
+            insert into public.audit_logs (user_id, user_name, action, entity, entity_id)
+            values (
+                new.id,
+                v_name,
+                'MEMBER_REGISTERED',
+                'profiles',
+                new.id::text
+            );
+        end if;
+    end if;
+
     return new;
 end;
 $$;

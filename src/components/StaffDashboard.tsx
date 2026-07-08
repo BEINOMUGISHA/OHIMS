@@ -274,21 +274,10 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
     };
 
     try {
-      const url = selectedPlan ? `/api/plans/${selectedPlan.id}` : '/api/plans';
-      const method = selectedPlan ? 'PUT' : 'POST';
-
-      const res = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentUser.id}`
-        },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setPlanError(data.error || 'Failed to save insurance plan');
-        return;
+      if (selectedPlan) {
+        await plansApi.update(selectedPlan.id, payload, currentUser.name);
+      } else {
+        await plansApi.create(payload, currentUser.name);
       }
       setPlanSuccess(selectedPlan ? 'Insurance plan updated successfully.' : 'New insurance plan created successfully.');
       setPlanName('');
@@ -303,7 +292,7 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
       onRefreshData();
       setTimeout(() => setPlanSuccess(''), 3000);
     } catch (err: any) {
-      setPlanError('Connection failed: ' + err.message);
+      setPlanError(err.message || 'Failed to save insurance plan.');
     }
   };
 

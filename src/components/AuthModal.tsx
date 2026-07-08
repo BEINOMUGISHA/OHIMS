@@ -58,7 +58,8 @@ export default function AuthModal({ onDismiss, onLoginSuccess, plans }: AuthModa
       onLoginSuccess(data.token);
       onDismiss();
     } catch (err: any) {
-      setLoginError(err.message || 'Authentication failed. Check credentials and try again.');
+      const msg = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err)) || 'Authentication failed. Check credentials and try again.';
+      setLoginError(msg);
     } finally {
       setLoginLoading(false);
     }
@@ -98,7 +99,8 @@ export default function AuthModal({ onDismiss, onLoginSuccess, plans }: AuthModa
         onDismiss();
       }, 1500);
     } catch (err: any) {
-      setRegError(err.message || 'Registration failed. Please try again.');
+      const msg = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err)) || 'Registration failed. Please try again.';
+      setRegError(msg);
     } finally {
       setRegLoading(false);
     }
@@ -119,7 +121,8 @@ export default function AuthModal({ onDismiss, onLoginSuccess, plans }: AuthModa
         setResetSuccess('');
       }, 2000);
     } catch (err: any) {
-      setResetError(err.message || 'Password reset failed.');
+      const msg = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err)) || 'Password reset failed.';
+      setResetError(msg);
     }
   };
 

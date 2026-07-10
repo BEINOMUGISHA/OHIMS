@@ -71,7 +71,7 @@ export const authApi = {
       dob, gender, address, selected_plan_id, premium_frequency,
     } = payload;
 
-    // 1. Create Supabase Auth user, passing all onboarding details in metadata options
+    // 1. Create Supabase Auth user
     const { data: authData, error: authErr } = await supabase.auth.signUp({
       email,
       password,
@@ -79,23 +79,82 @@ export const authApi = {
         data: {
           name,
           role: 'member',
-          phone,
-          national_id,
-          dob,
-          gender,
-          address,
-          selected_plan_id,
-          premium_frequency,
         }
       },
     });
     if (authErr) throw new Error(authErr.message);
     const userId = authData.user!.id;
 
-    // 2. Wait a brief moment to ensure trigger fn_handle_new_user completes execution
-    await new Promise(resolve => setTimeout(resolve, 600));
+    // 2. Wait a brief moment to ensure trigger creates the profile row
+    await new Promise(resolve => setTimeout(resolve, 800));
 
-    // 3. Return the full profile (created automatically by the secure database trigger)
+    // 3. Update profile with detailed onboarding info
+    const { error: profErr } = await supabase
+      .from('profiles')
+      .update({
+        phone,
+        national_id,
+        dob: dob || null,
+        gender,
+        address,
+      })
+      .eq('id', userId);
+    if (profErr) throw new Error(`Onboarding Profile: ${profErr.message}`);
+
+    // 4. Fetch selected plan details
+    const { data: plan, error: planErr } = await supabase
+      .from('plans')
+      .select('*')
+      .eq('id', selected_plan_id)
+      .single();
+    if (planErr || !plan) throw new Error('Selected health plan not found.');
+
+    // 5. Create active policy
+    const policyId = `POL-${new Date().getFullYear()}-${Math.floor(Math.random() * 90000 + 10000)}`;
+    const startDate = new Date().toISOString().split('T')[0];
+    const endDate = new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0];
+
+    const { error: polErr } = await supabase.from('policies').insert({
+      id: policyId,
+      user_id: userId,
+      plan_id: selected_plan_id,
+      status: 'active',
+      start_date: startDate,
+      end_date: endDate,
+      premium_rate: plan.premium_amount,
+      coverage_limit: plan.coverage_limit,
+      remaining_coverage: plan.coverage_limit,
+    });
+    if (polErr) throw new Error(`Policy Setup: ${polErr.message}`);
+
+    // 6. Create initial premium invoice
+    const premDue = new Date();
+    premDue.setDate(premDue.getDate() + 30);
+    const { error: premErr } = await supabase.from('premiums').insert({
+      policy_id: policyId,
+      amount: plan.premium_amount,
+      status: 'unpaid',
+      due_date: premDue.toISOString().split('T')[0],
+    });
+    if (premErr) throw new Error(`Premium Invoice: ${premErr.message}`);
+
+    // 7. Send welcome notification
+    await supabase.from('notifications').insert({
+      user_id: userId,
+      message: `Welcome to OHIMS Uganda! Your policy ${policyId} is now active under the ${plan.name} plan.`,
+      type: 'success',
+    });
+
+    // 8. Log system audit transaction
+    await supabase.from('audit_logs').insert({
+      user_id: userId,
+      user_name: name,
+      action: 'MEMBER_REGISTERED',
+      entity: 'profiles',
+      entity_id: userId,
+    });
+
+    // 9. Fetch completed profile
     const { data: profile } = await supabase
       .from('profiles')
       .select('*')

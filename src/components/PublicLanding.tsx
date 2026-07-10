@@ -111,12 +111,16 @@ export default function PublicLanding({ plans, onOpenAuth }: PublicLandingProps)
         </div>
 
         {/* Selection Tabs */}
-        <div className="flex justify-center bg-slate-200 p-1 rounded-xl max-w-md mx-auto mb-8 border border-slate-200">
+        <div className="flex justify-center bg-slate-200 dark:bg-slate-800 p-1 rounded-xl max-w-md mx-auto mb-8 border border-slate-200 dark:border-slate-700">
           {plans.map(p => (
             <button
               key={p.id}
               onClick={() => setSelectedPlanId(p.id)}
-              className={`flex-1 text-center py-2 text-xs font-bold rounded-lg transition-all ${selectedPlanId === p.id ? 'bg-[#0A1628] text-white shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
+              className={`flex-1 text-center py-2 text-xs font-bold rounded-lg transition-all ${
+                selectedPlanId === p.id 
+                  ? 'bg-[#0A1628] dark:bg-slate-100 text-white dark:text-slate-950 shadow-sm' 
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white'
+              }`}
             >
               {p.name.split(' (')[0]}
             </button>

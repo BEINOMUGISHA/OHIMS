@@ -71,7 +71,8 @@ export const authApi = {
       dob, gender, address, selected_plan_id, premium_frequency,
     } = payload;
 
-    // 1. Create Supabase Auth user
+    // 1. Create Supabase Auth user — pass ALL metadata so the DB trigger
+    //    can populate the profiles row even without a live session.
     const { data: authData, error: authErr } = await supabase.auth.signUp({
       email,
       password,
@@ -79,37 +80,47 @@ export const authApi = {
         data: {
           name,
           role: 'member',
+          phone,
+          national_id,
+          dob,
+          gender,
+          address,
+          selected_plan_id,
+          premium_frequency,
         }
       },
     });
     if (authErr) throw new Error(authErr.message);
-    const userId = authData.user!.id;
 
-    // 2. Wait a brief moment to ensure trigger creates the profile row
+    const userId = authData.user!.id;
+    const hasSession = !!authData.session; // false when email confirmation is required
+
+    // 2. If email confirmation is required, return a pending marker.
+    //    The UI will show a "check your inbox" message.
+    if (!hasSession) {
+      return {
+        user: null,
+        emailConfirmationRequired: true,
+        message: 'Registration successful! Please check your email inbox and click the confirmation link to activate your account.',
+      };
+    }
+
+    // 3. Session is live (email confirmation disabled) — complete onboarding now.
     await new Promise(resolve => setTimeout(resolve, 800));
 
-    // 3. Update profile with detailed onboarding info
+    // Update profile with detailed onboarding info
     const { error: profErr } = await supabase
       .from('profiles')
-      .update({
-        phone,
-        national_id,
-        dob: dob || null,
-        gender,
-        address,
-      })
+      .update({ phone, national_id, dob: dob || null, gender, address })
       .eq('id', userId);
     if (profErr) throw new Error(`Onboarding Profile: ${profErr.message}`);
 
-    // 4. Fetch selected plan details
+    // Fetch selected plan details
     const { data: plan, error: planErr } = await supabase
-      .from('plans')
-      .select('*')
-      .eq('id', selected_plan_id)
-      .single();
+      .from('plans').select('*').eq('id', selected_plan_id).single();
     if (planErr || !plan) throw new Error('Selected health plan not found.');
 
-    // 5. Create active policy
+    // Create active policy
     const policyId = `POL-${new Date().getFullYear()}-${Math.floor(Math.random() * 90000 + 10000)}`;
     const startDate = new Date().toISOString().split('T')[0];
     const endDate = new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0];
@@ -127,7 +138,7 @@ export const authApi = {
     });
     if (polErr) throw new Error(`Policy Setup: ${polErr.message}`);
 
-    // 6. Create initial premium invoice
+    // Create initial premium invoice
     const premDue = new Date();
     premDue.setDate(premDue.getDate() + 30);
     const { error: premErr } = await supabase.from('premiums').insert({
@@ -138,14 +149,14 @@ export const authApi = {
     });
     if (premErr) throw new Error(`Premium Invoice: ${premErr.message}`);
 
-    // 7. Send welcome notification
+    // Welcome notification
     await supabase.from('notifications').insert({
       user_id: userId,
       message: `Welcome to OHIMS Uganda! Your policy ${policyId} is now active under the ${plan.name} plan.`,
       type: 'success',
     });
 
-    // 8. Log system audit transaction
+    // Audit log
     await supabase.from('audit_logs').insert({
       user_id: userId,
       user_name: name,
@@ -154,14 +165,14 @@ export const authApi = {
       entity_id: userId,
     });
 
-    // 9. Fetch completed profile
+    // Fetch completed profile
     const { data: profile } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
+      .from('profiles').select('*').eq('id', userId).single();
 
-    return { user: profile || { id: userId, name, email, role: 'member' } };
+    return {
+      user: profile || { id: userId, name, email, role: 'member' },
+      emailConfirmationRequired: false,
+    };
   },
 
   /**

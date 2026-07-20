@@ -93,6 +93,14 @@ export default function AuthModal({ onDismiss, onLoginSuccess, plans }: AuthModa
         selected_plan_id: regPlanId,
         premium_frequency: regFreq,
       });
+
+      // Email confirmation required — show message and stay on modal
+      if (data.emailConfirmationRequired) {
+        setRegSuccess(data.message || 'Registration successful! Please check your email to confirm your account before signing in.');
+        return;
+      }
+
+      // Instant access (email confirmation disabled)
       setRegSuccess('Account created successfully! Forwarding to Member Dashboard...');
       setTimeout(() => {
         onLoginSuccess(data.user.id);

@@ -270,16 +270,57 @@ export const plansApi = {
   },
 };
 
-// ── USERS (sandbox switcher) ───────────────────────────────────────────
+// ── USERS / MEMBER MANAGEMENT ─────────────────────────────────────────
 
 export const usersApi = {
   list: async () => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, name, email, role, phone, created_at')
+      .select('id, name, email, role, phone, created_at, status')
       .order('created_at');
     if (error) throw new Error(error.message);
     return data ?? [];
+  },
+
+  /** Full member list with policy details — for staff member management tab */
+  listMembers: async (search?: string) => {
+    let q = supabase
+      .from('profiles')
+      .select(`
+        id, name, email, role, phone, national_id, gender, address, dob, photo, created_at, status,
+        policies (
+          id, status, plan_id, coverage_limit, remaining_coverage, start_date, end_date, premium_rate,
+          plans ( name ),
+          premiums ( id, amount, status, due_date ),
+          beneficiaries ( id, name, relationship )
+        )
+      `)
+      .eq('role', 'member')
+      .order('created_at', { ascending: false });
+    if (search) {
+      q = q.or(`name.ilike.%${search}%,email.ilike.%${search}%,national_id.ilike.%${search}%`);
+    }
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  },
+
+  suspend: async (userId: string, actorId: string, actorName: string) => {
+    const { error } = await supabase.from('profiles').update({ status: 'suspended' }).eq('id', userId);
+    if (error) throw new Error(error.message);
+    // Suspend their active policies too
+    await supabase.from('policies').update({ status: 'suspended' }).eq('user_id', userId).eq('status', 'active');
+    await addNotification(userId, 'Your OHIMS account has been suspended. Please contact support for assistance.', 'alert');
+    await writeAudit(actorId, actorName, 'MEMBER_SUSPENDED', 'profiles', userId);
+  },
+
+  reinstate: async (userId: string, actorId: string, actorName: string) => {
+    const { error } = await supabase.from('profiles').update({ status: 'active' }).eq('id', userId);
+    if (error) throw new Error(error.message);
+    // Reinstate their suspended policies
+    await supabase.from('policies').update({ status: 'active' }).eq('user_id', userId).eq('status', 'suspended');
+    await addNotification(userId, 'Your OHIMS account has been reinstated. Coverage is now restored.', 'success');
+    await writeAudit(actorId, actorName, 'MEMBER_REINSTATED', 'profiles', userId);
   },
 };
 
@@ -572,6 +613,48 @@ export const claimsApi = {
     }
     return data;
   },
+
+  /** Upload a document file to Supabase Storage and record it in claim_documents */
+  uploadDocument: async (claimId: string, file: File, actorId: string) => {
+    const ext = file.name.split('.').pop();
+    const path = `${actorId}/${claimId}/${Date.now()}.${ext}`;
+    const { error: upErr } = await supabase.storage.from('claim-documents').upload(path, file, { upsert: false });
+    if (upErr) throw new Error(`Upload failed: ${upErr.message}`);
+    const { data, error } = await supabase
+      .from('claim_documents')
+      .insert({ claim_id: claimId, file_path: path, file_name: file.name, file_size: file.size })
+      .select().single();
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  /** Fetch signed URLs for all documents on a claim */
+  getDocuments: async (claimId: string) => {
+    const { data, error } = await supabase
+      .from('claim_documents')
+      .select('*')
+      .eq('claim_id', claimId)
+      .order('uploaded_at', { ascending: false });
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) return [];
+    // Get signed URLs (valid 60 minutes)
+    const withUrls = await Promise.all(
+      data.map(async (doc: any) => {
+        const { data: urlData } = await supabase.storage
+          .from('claim-documents')
+          .createSignedUrl(doc.file_path, 3600);
+        return { ...doc, signed_url: urlData?.signedUrl ?? null };
+      })
+    );
+    return withUrls;
+  },
+
+  /** Delete a document from storage and the DB */
+  deleteDocument: async (docId: string, filePath: string) => {
+    await supabase.storage.from('claim-documents').remove([filePath]);
+    const { error } = await supabase.from('claim_documents').delete().eq('id', docId);
+    if (error) throw new Error(error.message);
+  },
 };
 
 // ── PREMIUMS ───────────────────────────────────────────────────────────
@@ -609,13 +692,7 @@ export const premiumsApi = {
 
     await writeAudit(actorId, actorName, 'PREMIUM_PAID', 'premiums', premiumId);
 
-    // Notify member
-    const { data: pol } = await supabase
-      .from('policies')
-      .select('user_id')
-      .eq('id', data.policy_id)
-      .single();
-
+    const { data: pol } = await supabase.from('policies').select('user_id').eq('id', data.policy_id).single();
     if (pol?.user_id) {
       await addNotification(
         pol.user_id,
@@ -624,6 +701,29 @@ export const premiumsApi = {
       );
     }
     return { ...data, receipt_number: receipt };
+  },
+
+  /**
+   * Mobile Money payment simulation (MTN / Airtel Uganda).
+   * In production: swap the setTimeout for a real Flutterwave/Pesapal API call.
+   * Returns the completed premium row with receipt_number on success.
+   */
+  payMobileMoney: async (
+    premiumId: string,
+    phone: string,
+    network: 'mtn' | 'airtel',
+    actorId: string,
+    actorName: string
+  ): Promise<{ receipt_number: string; amount: number; status: string }> => {
+    // Validate phone format (Uganda: 07xxxxxxxx or 03xxxxxxxx)
+    const cleaned = phone.replace(/\s/g, '');
+    if (!/^(07|03)\d{8}$/.test(cleaned)) {
+      throw new Error(`Invalid ${network.toUpperCase()} phone number. Use format 07XXXXXXXX.`);
+    }
+    // Simulate network push delay (3 seconds)
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Complete the payment in Supabase
+    return premiumsApi.pay(premiumId, actorId, actorName);
   },
 
   sendReminders: async (actorId: string, actorName: string) => {
@@ -690,6 +790,45 @@ export const providersApi = {
     if (error) throw new Error(error.message);
     await writeAudit(actorId, actorName, 'PROVIDER_UPDATED', 'providers', id);
     return data;
+  },
+
+  /**
+   * Check a member's insurance eligibility by National ID.
+   * Returns coverage details or null if member not found / not covered.
+   */
+  checkEligibility: async (nationalId: string) => {
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select(`
+        id, name, email, phone, dob, gender, national_id, photo,
+        policies (
+          id, status, plan_id, coverage_limit, remaining_coverage,
+          start_date, end_date, premium_rate,
+          plans ( name, description, benefits, exclusions ),
+          beneficiaries ( id, name, relationship )
+        )
+      `)
+      .eq('national_id', nationalId.trim())
+      .single();
+    if (error || !profile) return null;
+
+    const policies: any[] = (profile as any).policies ?? [];
+    const active = policies.find((p: any) => p.status === 'active');
+    return {
+      member: {
+        id: profile.id,
+        name: (profile as any).name,
+        email: (profile as any).email,
+        phone: (profile as any).phone,
+        dob: (profile as any).dob,
+        gender: (profile as any).gender,
+        national_id: (profile as any).national_id,
+        photo: (profile as any).photo,
+      },
+      policy: active ?? null,
+      is_eligible: !!active,
+      beneficiaries: active?.beneficiaries ?? [],
+    };
   },
 };
 

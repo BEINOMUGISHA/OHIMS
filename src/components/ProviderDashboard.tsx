@@ -41,6 +41,13 @@ export default function ProviderDashboard({ currentUser, onRefreshData }: Provid
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState('');
 
+  // Tab & Eligibility state
+  const [activeTab, setActiveTab] = useState<'claims' | 'eligibility'>('claims');
+  const [eligibilityNIN, setEligibilityNIN] = useState('');
+  const [eligibilityResult, setEligibilityResult] = useState<any | null>(null);
+  const [checkingEligibility, setCheckingEligibility] = useState(false);
+  const [eligibilityError, setEligibilityError] = useState('');
+
   // Patient search and file upload mockup states
   const [patientSearch, setPatientSearch] = useState('');
   const [selectedFileName, setSelectedFileName] = useState('');
@@ -82,6 +89,27 @@ export default function ProviderDashboard({ currentUser, onRefreshData }: Provid
   useEffect(() => {
     fetchProviderData();
   }, [currentUser]);
+
+  const handleCheckEligibility = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!eligibilityNIN.trim()) return;
+    setCheckingEligibility(true);
+    setEligibilityError('');
+    setEligibilityResult(null);
+
+    try {
+      const res = await providersApi.checkEligibility(eligibilityNIN);
+      if (!res) {
+        setEligibilityError(`No member found with National ID "${eligibilityNIN}". Check ID or confirm member registration.`);
+      } else {
+        setEligibilityResult(res);
+      }
+    } catch (err: any) {
+      setEligibilityError(err.message || 'Eligibility check failed');
+    } finally {
+      setCheckingEligibility(false);
+    }
+  };
 
   const handleSubmitClaim = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -350,64 +378,189 @@ export default function ProviderDashboard({ currentUser, onRefreshData }: Provid
         </div>
       )}
 
+      {/* Nav Tabs */}
+      <div className="flex border-b border-gray-200 overflow-x-auto scrollbar-thin whitespace-nowrap">
+        <button
+          onClick={() => setActiveTab('claims')}
+          className={`py-3 px-4 font-bold text-xs border-b-2 transition-colors flex-shrink-0 cursor-pointer ${activeTab === 'claims' ? 'border-[#0D9488] text-[#0D9488]' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+        >
+          Clinical Claims Queue ({providerClaims.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('eligibility')}
+          className={`py-3 px-4 font-bold text-xs border-b-2 transition-colors flex-shrink-0 cursor-pointer ${activeTab === 'eligibility' ? 'border-[#0D9488] text-[#0D9488]' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+        >
+          🔍 Patient Eligibility & Coverage Verification
+        </button>
+      </div>
+
       {/* Claims submitted list */}
-      <div className="space-y-4">
-        <h3 className="text-sm font-bold text-gray-400 font-mono uppercase tracking-wider block">Submitted Clinic Claims History</h3>
-        
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left font-sans text-xs">
-              <thead className="bg-[#0A1628] text-white font-mono uppercase tracking-wider">
-                <tr>
-                  <th className="p-4">Claim reference</th>
-                  <th className="p-4">Patient Name</th>
-                  <th className="p-4">Diagnosis</th>
-                  <th className="p-4">Treatment administered</th>
-                  <th className="p-4 text-center">Amount claimed</th>
-                  <th className="p-4 text-center">Approved compensation</th>
-                  <th className="p-4">Status State</th>
-                  <th className="p-4">Clinical Response</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {providerClaims.length === 0 ? (
+      {activeTab === 'claims' && (
+        <div className="space-y-4">
+          <h3 className="text-sm font-bold text-gray-400 font-mono uppercase tracking-wider block">Submitted Clinic Claims History</h3>
+          
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left font-sans text-xs">
+                <thead className="bg-[#0A1628] text-white font-mono uppercase tracking-wider">
                   <tr>
-                    <td colSpan={8} className="p-8 text-center text-gray-400">
-                      No clinical claims recorded for this clinic.
-                    </td>
+                    <th className="p-4">Claim reference</th>
+                    <th className="p-4">Patient Name</th>
+                    <th className="p-4">Diagnosis</th>
+                    <th className="p-4">Treatment administered</th>
+                    <th className="p-4 text-center">Amount claimed</th>
+                    <th className="p-4 text-center">Approved compensation</th>
+                    <th className="p-4">Status State</th>
+                    <th className="p-4">Clinical Response</th>
                   </tr>
-                ) : (
-                  providerClaims.map((c: any) => (
-                    <tr key={c.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="p-4 font-mono font-bold text-[#0A1628]">{c.id}</td>
-                      <td className="p-4 font-bold text-gray-800">{c.holder_name}</td>
-                      <td className="p-4 font-medium text-gray-700">{c.diagnosis}</td>
-                      <td className="p-4 text-gray-500 font-mono text-[11px]">{c.treatment}</td>
-                      <td className="p-4 text-center font-mono font-bold text-gray-900">UGX {c.amount_claimed.toLocaleString()}</td>
-                      <td className="p-4 text-center font-mono font-bold text-[#0D9488]">
-                        {c.amount_approved > 0 ? `UGX ${c.amount_approved.toLocaleString()}` : '--'}
-                      </td>
-                      <td className="p-4">
-                        <span className={`text-[10px] uppercase font-bold font-mono px-2 py-0.5 rounded leading-none ${
-                          c.status === 'paid' ? 'bg-teal-100 text-teal-800 border border-teal-200' :
-                          c.status === 'approved' ? 'bg-emerald-100 text-teal-800' :
-                          c.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                          'bg-yellow-100 text-yellow-800'
-                        }`}>
-                          {c.status}
-                        </span>
-                      </td>
-                      <td className="p-4 text-gray-400 font-mono text-[10px]" title={c.notes}>
-                        {c.notes || 'In review queue.'}
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {providerClaims.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-8 text-center text-gray-400">
+                        No clinical claims recorded for this clinic.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    providerClaims.map((c: any) => (
+                      <tr key={c.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="p-4 font-mono font-bold text-[#0A1628]">{c.id}</td>
+                        <td className="p-4 font-bold text-gray-800">{c.holder_name}</td>
+                        <td className="p-4 font-medium text-gray-700">{c.diagnosis}</td>
+                        <td className="p-4 text-gray-500 font-mono text-[11px]">{c.treatment}</td>
+                        <td className="p-4 text-center font-mono font-bold text-gray-900">UGX {c.amount_claimed.toLocaleString()}</td>
+                        <td className="p-4 text-center font-mono font-bold text-[#0D9488]">
+                          {c.amount_approved > 0 ? `UGX ${c.amount_approved.toLocaleString()}` : '--'}
+                        </td>
+                        <td className="p-4">
+                          <span className={`text-[10px] uppercase font-bold font-mono px-2 py-0.5 rounded leading-none ${
+                            c.status === 'paid' ? 'bg-teal-100 text-teal-800 border border-teal-200' :
+                            c.status === 'approved' ? 'bg-emerald-100 text-teal-800' :
+                            c.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                            'bg-yellow-100 text-yellow-800'
+                          }`}>
+                            {c.status}
+                          </span>
+                        </td>
+                        <td className="p-4 text-gray-400 font-mono text-[10px]" title={c.notes}>
+                          {c.notes || 'In review queue.'}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* Patient Eligibility Verification Tab */}
+      {activeTab === 'eligibility' && (
+        <div className="space-y-6 max-w-3xl mx-auto">
+          <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+            <div>
+              <h3 className="text-lg font-black text-[#0A1628]">Verify Patient Health Coverage Eligibility</h3>
+              <p className="text-xs text-gray-500">Scan or enter National ID (NIN) to verify active insurance status, remaining balance, and dependants before clinical service rendering.</p>
+            </div>
+
+            <form onSubmit={handleCheckEligibility} className="flex gap-3">
+              <input
+                type="text"
+                required
+                placeholder="Enter Uganda National ID (e.g. CM01037AGV2G)"
+                value={eligibilityNIN}
+                onChange={e => setEligibilityNIN(e.target.value)}
+                className="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-xs font-mono bg-white outline-none focus:ring-1 focus:ring-[#0D9488] uppercase"
+              />
+              <button
+                type="submit"
+                disabled={checkingEligibility}
+                className="bg-[#0D9488] hover:bg-[#0b7e74] text-white text-xs font-bold px-6 py-2.5 rounded-xl shadow-sm cursor-pointer"
+              >
+                {checkingEligibility ? 'Verifying...' : 'Check Coverage'}
+              </button>
+            </form>
+
+            {eligibilityError && (
+              <div className="p-3 bg-red-50 text-red-600 border border-red-200 rounded-xl text-xs font-medium">
+                {eligibilityError}
+              </div>
+            )}
+          </div>
+
+          {/* Verification Result Display */}
+          {eligibilityResult && (
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-md p-6 space-y-6 animate-fade-in-down">
+              <div className="flex items-center justify-between border-b border-gray-100 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-teal-800 text-white font-mono font-bold flex items-center justify-center text-sm">
+                    {eligibilityResult.member?.name?.[0]}
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-base text-[#0A1628]">{eligibilityResult.member?.name}</h4>
+                    <span className="text-xs text-gray-400 font-mono">NIN: {eligibilityResult.member?.national_id} | Phone: {eligibilityResult.member?.phone}</span>
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <span className={`text-xs uppercase font-mono font-black px-3 py-1 rounded-xl block ${
+                    eligibilityResult.is_eligible ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-red-100 text-red-800 border border-red-300'
+                  }`}>
+                    {eligibilityResult.is_eligible ? '✓ COVERAGE ACTIVE' : '❌ NOT COVERED'}
+                  </span>
+                </div>
+              </div>
+
+              {eligibilityResult.is_eligible && eligibilityResult.policy && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono text-xs">
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-1">
+                    <span className="text-[10px] text-gray-400 uppercase font-bold block">Assigned Plan Tier</span>
+                    <span className="font-extrabold text-[#0D9488] text-sm">{eligibilityResult.policy.plans?.name || 'Standard Plan'}</span>
+                  </div>
+
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-1">
+                    <span className="text-[10px] text-gray-400 uppercase font-bold block">Annual Limit</span>
+                    <span className="font-extrabold text-[#0A1628] text-sm">UGX {(eligibilityResult.policy.coverage_limit || 5000000).toLocaleString()}</span>
+                  </div>
+
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-1">
+                    <span className="text-[10px] text-gray-400 uppercase font-bold block">Remaining Balance</span>
+                    <span className="font-extrabold text-emerald-600 text-sm">UGX {(eligibilityResult.policy.remaining_coverage || 5000000).toLocaleString()}</span>
+                  </div>
+                </div>
+              )}
+
+              {eligibilityResult.beneficiaries?.length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-gray-100">
+                  <h5 className="font-bold text-xs text-gray-700 uppercase tracking-wider font-mono">Eligible Covered Dependants</h5>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {eligibilityResult.beneficiaries.map((b: any) => (
+                      <div key={b.id} className="p-2.5 bg-teal-50/50 border border-teal-100 rounded-xl flex justify-between items-center text-xs">
+                        <span className="font-bold text-gray-800">{b.name}</span>
+                        <span className="text-[10px] font-mono text-[#0D9488] bg-teal-100 px-2 py-0.5 rounded uppercase font-bold">{b.relationship}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {eligibilityResult.is_eligible && (
+                <button
+                  onClick={() => {
+                    setSelectedPolicyId(eligibilityResult.policy?.id);
+                    setShowClaimForm(true);
+                    setActiveTab('claims');
+                  }}
+                  className="w-full bg-[#0D9488] hover:bg-[#0b7e74] text-white font-bold text-xs py-2.5 rounded-xl shadow-sm cursor-pointer"
+                >
+                  Proceed to File Claim for this Member
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
     </div>
   );

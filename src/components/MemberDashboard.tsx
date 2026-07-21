@@ -29,6 +29,7 @@ import {
   Info
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
+import QRCode from 'qrcode';
 import {
   ResponsiveContainer,
   BarChart,
@@ -53,7 +54,24 @@ interface MemberDashboardProps {
 export default function MemberDashboard({ currentUser, onRefreshData }: MemberDashboardProps) {
   const [memberData, setMemberData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'claims' | 'premiums' | 'providers' | 'checker' | 'estimator' | 'ai_chat' | 'settings' | 'hologram'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'claims' | 'premiums' | 'beneficiaries' | 'providers' | 'checker' | 'estimator' | 'ai_chat' | 'settings' | 'hologram'>('overview');
+
+  // Mobile Money Payment Modal State
+  const [payingPremium, setPayingPremium] = useState<Premium | null>(null);
+  const [mmNetwork, setMmNetwork] = useState<'mtn' | 'airtel'>('mtn');
+  const [mmPhone, setMmPhone] = useState(currentUser.phone || '0775949229');
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [paymentStep, setPaymentStep] = useState<'input' | 'prompting' | 'success' | 'failed'>('input');
+  const [mmError, setMmError] = useState('');
+  const [lastReceipt, setLastReceipt] = useState<string | null>(null);
+
+  // Claim Document Upload & Viewer State
+  const [claimFile, setClaimFile] = useState<File | null>(null);
+  const [claimFileUploading, setClaimFileUploading] = useState(false);
+  const [viewingClaimDocs, setViewingClaimDocs] = useState<any[]>([]);
+  const [showDocsModal, setShowDocsModal] = useState(false);
+  const [docsModalTitle, setDocsModalTitle] = useState('');
+  const [loadingDocs, setLoadingDocs] = useState(false);
   
   // AI Chat States
   const [aiMessages, setAiMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([
@@ -163,6 +181,145 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
     fetchProfile();
   }, [currentUser]);
 
+  // Handle ID Card PDF Download
+  const handleDownloadIdCard = async () => {
+    if (!activePolicy || !memberData?.member) return;
+    try {
+      const qrDataUrl = await QRCode.toDataURL(JSON.stringify({
+        policy_id: activePolicy.id,
+        national_id: memberData.member?.national_id || 'N/A',
+        name: memberData.member?.name || currentUser.name,
+        plan: activePolicy.plans?.name || 'OHIMS Health Plan',
+        status: activePolicy.status
+      }));
+
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [85.6, 54] });
+      
+      // Card Background (Dark Navy)
+      doc.setFillColor(10, 22, 40);
+      doc.rect(0, 0, 85.6, 54, 'F');
+      
+      // Top Teal Banner
+      doc.setFillColor(13, 148, 136);
+      doc.rect(0, 0, 85.6, 8, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'bold');
+      doc.text('OHIMS UGANDA — NATIONAL HEALTH INSURANCE CARD', 4, 5.5);
+      
+      // Member Name
+      doc.setFontSize(10);
+      doc.setTextColor(255, 255, 255);
+      doc.text((memberData.member?.name || currentUser.name).toUpperCase(), 4, 15);
+      
+      // Member Details
+      doc.setFontSize(6.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(148, 163, 184);
+      doc.text('National ID:', 4, 21);
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.text(memberData.member?.national_id || 'N/A', 22, 21);
+      
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(148, 163, 184);
+      doc.text('Policy ID:', 4, 26);
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.text(activePolicy.id, 22, 26);
+      
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(148, 163, 184);
+      doc.text('Plan Tier:', 4, 31);
+      doc.setTextColor(13, 148, 136);
+      doc.setFont('helvetica', 'bold');
+      doc.text(activePolicy.plans?.name || 'Standard Health Plan', 22, 31);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(148, 163, 184);
+      doc.text('Limit:', 4, 36);
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`UGX ${(activePolicy.coverage_limit || activePolicy.plan_limit || 5000000).toLocaleString()}`, 22, 36);
+      
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(148, 163, 184);
+      doc.text('Valid Until:', 4, 41);
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.text(activePolicy.end_date || '2026-12-31', 22, 41);
+      
+      // Status pill
+      doc.setFillColor(13, 148, 136);
+      doc.roundedRect(4, 45, 24, 5, 1, 1, 'F');
+      doc.setFontSize(6);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(255, 255, 255);
+      doc.text(`STATUS: ${activePolicy.status.toUpperCase()}`, 5.5, 48.5);
+      
+      // QR Code
+      doc.addImage(qrDataUrl, 'PNG', 56, 12, 25, 25);
+      doc.setFontSize(5);
+      doc.setTextColor(148, 163, 184);
+      doc.text('Scan for Verification', 58, 40);
+      
+      doc.save(`OHIMS_Insurance_Card_${activePolicy.id}.pdf`);
+    } catch (e) {
+      console.error('Failed to generate PDF ID card', e);
+    }
+  };
+
+  // Open Mobile Money Modal
+  const handleOpenMobileMoneyModal = (prem: Premium) => {
+    setPayingPremium(prem);
+    setPaymentStep('input');
+    setMmError('');
+    setLastReceipt(null);
+  };
+
+  // Process Mobile Money Payment
+  const handleProcessMobileMoneyPayment = async () => {
+    if (!payingPremium) return;
+    setMmError('');
+    setIsProcessingPayment(true);
+    setPaymentStep('prompting');
+
+    try {
+      const res = await premiumsApi.payMobileMoney(
+        payingPremium.id,
+        mmPhone,
+        mmNetwork,
+        currentUser.id,
+        currentUser.name
+      );
+      setLastReceipt(res.receipt_number);
+      setPaymentStep('success');
+      onRefreshData();
+      fetchProfile();
+    } catch (err: any) {
+      setMmError(err.message || 'Mobile Money transaction failed');
+      setPaymentStep('failed');
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  };
+
+  // View Claim Documents
+  const handleViewClaimDocs = async (claimId: string, diagnosis: string) => {
+    setDocsModalTitle(diagnosis);
+    setShowDocsModal(true);
+    setLoadingDocs(true);
+    try {
+      const docs = await claimsApi.getDocuments(claimId);
+      setViewingClaimDocs(docs);
+    } catch (e) {
+      console.error(e);
+      setViewingClaimDocs([]);
+    } finally {
+      setLoadingDocs(false);
+    }
+  };
+
   // Handle premium self payment
   const handlePayPremium = async (premId: string) => {
     try {
@@ -203,7 +360,7 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
     }
 
     try {
-      await claimsApi.submit({
+      const createdClaim = await claimsApi.submit({
         policy_id: claimPlanId,
         diagnosis: claimDiagnosis,
         treatment: claimTreatment,
@@ -211,12 +368,25 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
         actorId: currentUser.id,
         actorName: currentUser.name,
       });
-      setClaimSuccess('Claim filed successfully and sent for review!');
+
+      if (claimFile && createdClaim?.id) {
+        setClaimFileUploading(true);
+        try {
+          await claimsApi.uploadDocument(createdClaim.id, claimFile, currentUser.id);
+        } catch (fileErr) {
+          console.warn('Document upload warning:', fileErr);
+        } finally {
+          setClaimFileUploading(false);
+        }
+      }
+
+      setClaimSuccess('Claim filed successfully with supporting documents and sent for review!');
       setTimeout(() => {
         setShowClaimForm(false);
         setClaimDiagnosis('');
         setClaimTreatment('');
         setClaimAmount('');
+        setClaimFile(null);
         setClaimSuccess('');
         onRefreshData();
         fetchProfile();
@@ -1164,6 +1334,7 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
           { id: 'overview', label: 'Overview & Policy Card' },
           { id: 'claims', label: 'My Claims history' },
           { id: 'premiums', label: 'Premiums Tracking' },
+          { id: 'beneficiaries', label: '👨‍👩‍👧 Dependants & Beneficiaries' },
           { id: 'checker', label: 'Coverage benefits Checker' },
           { id: 'estimator', label: 'Premium Estimator' },
           { id: 'providers', label: 'Accredited Clinics & Route Finder' },
@@ -1335,53 +1506,61 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
             <h3 className="text-sm font-bold text-gray-400 font-mono uppercase tracking-wider block">Digital Member Card</h3>
             
             {activePolicy ? (
-              <div id="digital-member-card" className="bg-gradient-to-tr from-[#0a1628] to-[#122842] rounded-3xl p-6 text-white shadow-xl relative overflow-hidden border border-teal-500/20">
-                {/* Background medical grid emblem mock */}
-                <div className="absolute -right-10 -bottom-10 opacity-10 bg-teal-500 h-40 w-40 rounded-full" />
-                
-                <div className="flex justify-between items-start mb-10">
-                  <div>
-                    <span className="text-[10px] text-teal-400 font-mono font-bold tracking-widest uppercase block">Online Health Insurance (OHIMS) Uganda</span>
-                    <span className="text-xs font-semibold text-gray-300 block">Health Insurance Card</span>
+              <div className="space-y-3">
+                <div id="digital-member-card" className="bg-gradient-to-tr from-[#0a1628] to-[#122842] rounded-3xl p-6 text-white shadow-xl relative overflow-hidden border border-teal-500/20">
+                  {/* Background medical grid emblem mock */}
+                  <div className="absolute -right-10 -bottom-10 opacity-10 bg-teal-500 h-40 w-40 rounded-full" />
+                  
+                  <div className="flex justify-between items-start mb-10">
+                    <div>
+                      <span className="text-[10px] text-teal-400 font-mono font-bold tracking-widest uppercase block">Online Health Insurance (OHIMS) Uganda</span>
+                      <span className="text-xs font-semibold text-gray-300 block">Health Insurance Card</span>
+                    </div>
+                    <div className="bg-[#0D9488] p-1.5 rounded-lg text-white">
+                      <Shield className="h-5 w-5" />
+                    </div>
                   </div>
-                  <div className="bg-[#0D9488] p-1.5 rounded-lg text-white">
-                    <Shield className="h-5 w-5" />
+
+                  <div className="space-y-4">
+                    <div>
+                      <span className="text-[9px] text-gray-400 uppercase tracking-wider font-mono block">Enrolled Policyholder</span>
+                      <span className="text-base font-bold tracking-tight">{memberData.member.name}</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 text-xs leading-none">
+                      <div>
+                        <span className="text-[9px] text-gray-400 uppercase tracking-wider font-mono block">National ID</span>
+                        <span className="font-semibold font-mono">{memberData.member.national_id}</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-gray-400 uppercase tracking-wider font-mono block">Policy ID</span>
+                        <span className="font-semibold font-mono">{activePolicy.id}</span>
+                      </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-slate-800 flex justify-between items-center">
+                      <div>
+                        <span className="text-[9px] text-gray-400 uppercase tracking-wider font-mono block">Status State</span>
+                        <span className={`text-[10px] uppercase font-mono font-bold px-2 py-0.5 rounded ${activePolicy.status === 'active' ? 'bg-[#0D9488]/30 text-teal-300' : 'bg-red-500/30 text-red-300'}`}>
+                          ● {activePolicy.status}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[9px] text-gray-400 uppercase tracking-wider font-mono block">Expiry Term</span>
+                        <span className={`font-semibold text-xs font-mono transition-colors flex items-center justify-end gap-1 ${isExpiringSoon || isExpired ? 'text-amber-450 font-bold' : 'text-white'}`}>
+                          {isExpiringSoon || isExpired ? <AlertTriangle className="h-3.5 w-3.5 inline text-amber-500 animate-pulse" /> : null}
+                          {isSimulatingExpiry ? '2026-06-22' : activePolicy.end_date}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <span className="text-[9px] text-gray-400 uppercase tracking-wider font-mono block">Enrolled Policyholder</span>
-                    <span className="text-base font-bold tracking-tight">{memberData.member.name}</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 text-xs leading-none">
-                    <div>
-                      <span className="text-[9px] text-gray-400 uppercase tracking-wider font-mono block">National ID</span>
-                      <span className="font-semibold font-mono">{memberData.member.national_id}</span>
-                    </div>
-                    <div>
-                      <span className="text-[9px] text-gray-400 uppercase tracking-wider font-mono block">Policy ID</span>
-                      <span className="font-semibold font-mono">{activePolicy.id}</span>
-                    </div>
-                  </div>
-
-                  <div className="pt-4 border-t border-slate-800 flex justify-between items-center">
-                    <div>
-                      <span className="text-[9px] text-gray-400 uppercase tracking-wider font-mono block">Status State</span>
-                      <span className={`text-[10px] uppercase font-mono font-bold px-2 py-0.5 rounded ${activePolicy.status === 'active' ? 'bg-[#0D9488]/30 text-teal-300' : 'bg-red-500/30 text-red-300'}`}>
-                        ● {activePolicy.status}
-                      </span>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-[9px] text-gray-400 uppercase tracking-wider font-mono block">Expiry Term</span>
-                      <span className={`font-semibold text-xs font-mono transition-colors flex items-center justify-end gap-1 ${isExpiringSoon || isExpired ? 'text-amber-450 font-bold' : 'text-white'}`}>
-                        {isExpiringSoon || isExpired ? <AlertTriangle className="h-3.5 w-3.5 inline text-amber-500 animate-pulse" /> : null}
-                        {isSimulatingExpiry ? '2026-06-22' : activePolicy.end_date}
-                      </span>
-                    </div>
-                  </div>
-                </div>
+                <button
+                  onClick={handleDownloadIdCard}
+                  className="w-full bg-[#0D9488] hover:bg-[#0b7e74] text-white text-xs font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+                >
+                  <Download className="h-4 w-4" /> Download Official PDF Insurance Card (with QR)
+                </button>
               </div>
             ) : (
               <div className="bg-red-50 border border-red-100 p-6 rounded-2xl text-center space-y-2">
@@ -1621,11 +1800,18 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-bold text-[#0D9488] uppercase mb-0.5">Supporting Clinical files</label>
-                    <div className="border border-dashed border-teal-200 bg-teal-50/50 rounded p-1.5 flex items-center justify-between">
-                      <span className="text-[10px] text-[#0D9488] font-mono leading-none">✓ practitioner-bill.pdf</span>
-                      <span className="text-[9px] text-[#0D9488] bg-[#0D9488]/15 px-1 rounded font-bold font-mono">152 KB</span>
-                    </div>
+                    <label className="block text-[10px] font-bold text-[#0D9488] uppercase mb-0.5">Attach Clinical Receipt / Report (PDF/Image)</label>
+                    <input
+                      type="file"
+                      accept=".pdf,.png,.jpg,.jpeg"
+                      onChange={e => setClaimFile(e.target.files?.[0] || null)}
+                      className="w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-[10px] file:font-bold file:bg-teal-50 file:text-[#0D9488] hover:file:bg-teal-100 cursor-pointer"
+                    />
+                    {claimFile && (
+                      <span className="text-[9px] text-teal-600 font-mono block mt-1">
+                        Attached: {claimFile.name} ({(claimFile.size / 1024).toFixed(0)} KB)
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -1846,14 +2032,23 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
                           {c.notes || 'Under review by Online Health Insurance (OHIMS) clinical assessors.'}
                         </td>
                         <td className="p-4 text-center">
-                          <button
-                            onClick={() => exportClaimToPDF(c)}
-                            title="Download Claim PDF Summary"
-                            className="bg-white hover:bg-[#0D9488]/10 text-slate-800 hover:text-[#0D9488] text-[9px] font-bold font-mono px-2.5 py-1.5 rounded-lg border border-gray-250 flex items-center justify-center gap-1 mx-auto transition-all duration-150 cursor-pointer"
-                          >
-                            <FileText className="h-3 w-3 text-[#0D9488]" />
-                            PDF
-                          </button>
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              onClick={() => exportClaimToPDF(c)}
+                              title="Download Claim PDF Summary"
+                              className="bg-white hover:bg-[#0D9488]/10 text-slate-800 hover:text-[#0D9488] text-[9px] font-bold font-mono px-2 py-1 rounded-lg border border-gray-250 flex items-center justify-center gap-1 transition-all cursor-pointer"
+                            >
+                              <FileText className="h-3 w-3 text-[#0D9488]" />
+                              PDF
+                            </button>
+                            <button
+                              onClick={() => handleViewClaimDocs(c.id, c.diagnosis)}
+                              title="View Attached Clinical Documents"
+                              className="bg-white hover:bg-teal-50 text-[#0D9488] text-[9px] font-bold font-mono px-2 py-1 rounded-lg border border-teal-200 flex items-center justify-center gap-1 transition-all cursor-pointer"
+                            >
+                              📎 Docs
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -1910,10 +2105,10 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
                       <td className="p-4 text-center">
                         {p.status !== 'paid' ? (
                           <button
-                            onClick={() => handlePayPremium(p.id)}
-                            className="bg-[#0D9488] hover:bg-[#0b7e74] text-white text-[10px] font-bold px-3 py-1.5 rounded-lg shadow-sm font-sans"
+                            onClick={() => handleOpenMobileMoneyModal(p)}
+                            className="bg-[#0D9488] hover:bg-[#0b7e74] text-white text-[10px] font-bold px-3 py-1.5 rounded-lg shadow-sm font-sans cursor-pointer"
                           >
-                            Pay Bill Now
+                            Pay via Mobile Money
                           </button>
                         ) : (
                           <button
@@ -1928,6 +2123,145 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
                       </td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== TAB DEPENDANTS & BENEFICIARIES ==================== */}
+      {activeTab === 'beneficiaries' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+            <div>
+              <h3 className="text-lg font-black text-[#0A1628]">Policy Dependants & Beneficiaries</h3>
+              <p className="text-xs text-gray-500">Family members covered under your active OHIMS health coverage benefits</p>
+            </div>
+            <button
+              onClick={() => setShowBenForm(!showBenForm)}
+              className="bg-[#0D9488] hover:bg-[#0b7e74] text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-sm cursor-pointer"
+            >
+              <Plus className="h-4 w-4" /> {showBenForm ? 'Close Form' : 'Add New Dependant'}
+            </button>
+          </div>
+
+          {/* Add Beneficiary Form Modal/Card */}
+          {showBenForm && (
+            <div className="bg-slate-50 border border-slate-200 p-5 rounded-2xl max-w-xl mx-auto space-y-4">
+              <h4 className="font-bold text-xs text-[#0A1628] uppercase tracking-wider border-b border-gray-200 pb-2">
+                Register Dependant under Active Policy
+              </h4>
+              <form onSubmit={handleAddBeneficiary} className="space-y-3 font-sans text-xs">
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-0.5">Full Name</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Jane Doe Mugisha"
+                    value={benName}
+                    onChange={e => setBenName(e.target.value)}
+                    className="w-full border border-gray-200 rounded px-2.5 py-1.5 bg-white outline-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-0.5">Relationship</label>
+                    <select
+                      value={benRelation}
+                      onChange={e => setBenRelation(e.target.value)}
+                      className="w-full border border-gray-200 rounded px-2.5 py-1.5 bg-white outline-none"
+                    >
+                      <option value="Spouse">Spouse</option>
+                      <option value="Child">Child</option>
+                      <option value="Parent">Parent</option>
+                      <option value="Sibling">Sibling</option>
+                      <option value="Other">Other Dependant</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-0.5">Date of Birth</label>
+                    <input
+                      type="date"
+                      required
+                      value={benDob}
+                      onChange={e => setBenDob(e.target.value)}
+                      className="w-full border border-gray-200 rounded px-2.5 py-1.5 bg-white outline-none font-mono"
+                    />
+                  </div>
+                </div>
+
+                {benError && <div className="p-2 bg-red-50 text-red-600 border border-red-200 rounded font-medium">{benError}</div>}
+                {benSuccess && <div className="p-2 bg-teal-50 text-teal-700 border border-teal-200 font-bold rounded">{benSuccess}</div>}
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowBenForm(false)}
+                    className="text-gray-400 hover:text-gray-600 px-3 py-1"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="bg-[#0D9488] hover:bg-[#0b7e74] text-white font-bold px-4 py-1.5 rounded-lg"
+                  >
+                    Register Dependant
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* Dependants List Table */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left font-sans text-xs">
+                <thead className="bg-[#0A1628] text-white font-mono uppercase tracking-wider text-[10px]">
+                  <tr>
+                    <th className="p-4">Dependant Name</th>
+                    <th className="p-4">Relationship</th>
+                    <th className="p-4">Date of Birth</th>
+                    <th className="p-4">National ID</th>
+                    <th className="p-4 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {(!activePolicy?.beneficiaries || activePolicy.beneficiaries.length === 0) ? (
+                    <tr>
+                      <td colSpan={5} className="p-8 text-center text-gray-400">
+                        No dependants registered under this policy yet. Click "Add New Dependant" to add family members.
+                      </td>
+                    </tr>
+                  ) : (
+                    activePolicy.beneficiaries.map((b: any) => (
+                      <tr key={b.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="p-4 font-bold text-[#0A1628] flex items-center gap-2">
+                          <div className="h-7 w-7 rounded-full bg-teal-100 text-[#0D9488] font-mono font-bold flex items-center justify-center text-xs">
+                            {b.name?.[0]?.toUpperCase()}
+                          </div>
+                          {b.name}
+                        </td>
+                        <td className="p-4">
+                          <span className="bg-teal-50 text-[#0D9488] font-bold font-mono text-[10px] uppercase px-2 py-0.5 rounded border border-teal-100">
+                            {b.relationship}
+                          </span>
+                        </td>
+                        <td className="p-4 font-mono text-gray-600">{b.dob || 'N/A'}</td>
+                        <td className="p-4 font-mono text-gray-500">{b.national_id || 'N/A'}</td>
+                        <td className="p-4 text-right">
+                          <button
+                            onClick={() => handleDeleteBeneficiary(b.id)}
+                            className="text-red-500 hover:text-red-700 font-bold hover:bg-red-50 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -2755,6 +3089,161 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
       {/* ==================== TAB 9: 3D DIAGNOSTICS HOLOGRAM ==================== */}
       {activeTab === 'hologram' && (
         <MedicalHologramDashboard onRefreshData={onRefreshData} />
+      )}
+
+      {/* Mobile Money Payment Modal */}
+      {payingPremium && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl border border-gray-100 p-6 max-w-md w-full space-y-5 animate-fade-in-down">
+            <div className="flex justify-between items-center border-b border-gray-100 pb-3">
+              <div>
+                <h4 className="font-extrabold text-sm text-[#0A1628]">UGX Premium Payment Gateway</h4>
+                <span className="text-[10px] text-teal-600 font-mono">Installment #{payingPremium.id}</span>
+              </div>
+              <button
+                onClick={() => setPayingPremium(null)}
+                className="text-gray-400 hover:text-gray-600 font-bold text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {paymentStep === 'input' && (
+              <div className="space-y-4 font-sans text-xs">
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex justify-between items-center font-mono">
+                  <span className="text-gray-500">Amount Due:</span>
+                  <span className="font-extrabold text-[#0D9488] text-sm">UGX {payingPremium.amount.toLocaleString()}</span>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Select Payment Network</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setMmNetwork('mtn')}
+                      className={`p-3 rounded-xl border font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${mmNetwork === 'mtn' ? 'border-amber-400 bg-amber-50 text-amber-900 shadow-sm' : 'border-gray-200 bg-white text-gray-600'}`}
+                    >
+                      <span className="font-black text-amber-500 text-sm">MTN</span>
+                      <span className="text-[9px] text-gray-400">Mobile Money</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMmNetwork('airtel')}
+                      className={`p-3 rounded-xl border font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${mmNetwork === 'airtel' ? 'border-red-400 bg-red-50 text-red-900 shadow-sm' : 'border-gray-200 bg-white text-gray-600'}`}
+                    >
+                      <span className="font-black text-red-500 text-sm">Airtel</span>
+                      <span className="text-[9px] text-gray-400">Airtel Money</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Registered Phone Number</label>
+                  <input
+                    type="text"
+                    value={mmPhone}
+                    onChange={e => setMmPhone(e.target.value)}
+                    placeholder="e.g. 0775949229"
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs font-mono bg-white outline-none focus:ring-1 focus:ring-[#0D9488]"
+                  />
+                  <span className="text-[9px] text-gray-400 mt-1 block">A USSD prompt will be pushed to this phone to authorize PIN.</span>
+                </div>
+
+                {mmError && <div className="p-2 bg-red-50 text-red-600 border border-red-200 rounded text-xs">{mmError}</div>}
+
+                <button
+                  onClick={handleProcessMobileMoneyPayment}
+                  disabled={isProcessingPayment}
+                  className="w-full bg-[#0D9488] hover:bg-[#0b7e74] text-white font-bold py-2.5 rounded-xl shadow-sm transition-all cursor-pointer"
+                >
+                  Pay UGX {payingPremium.amount.toLocaleString()} via {mmNetwork.toUpperCase()}
+                </button>
+              </div>
+            )}
+
+            {paymentStep === 'prompting' && (
+              <div className="py-8 text-center space-y-4">
+                <RefreshCw className="h-10 w-10 text-[#0D9488] animate-spin mx-auto" />
+                <div>
+                  <h4 className="font-bold text-sm text-[#0A1628]">Check your phone ({mmPhone})</h4>
+                  <p className="text-xs text-gray-500 mt-1 max-w-xs mx-auto">
+                    USSD push request dispatched. Enter your Mobile Money PIN to authorize UGX {payingPremium.amount.toLocaleString()}.
+                  </p>
+                </div>
+                <div className="text-[10px] text-teal-600 font-mono animate-pulse">
+                  Simulating carrier network confirmation handshake...
+                </div>
+              </div>
+            )}
+
+            {paymentStep === 'success' && (
+              <div className="py-6 text-center space-y-4">
+                <CheckCircle className="h-12 w-12 text-teal-500 mx-auto animate-bounce-slow" />
+                <div>
+                  <h4 className="font-extrabold text-base text-[#0A1628]">Payment Confirmed!</h4>
+                  <p className="text-xs text-gray-500 mt-1">Receipt Reference: <strong className="font-mono text-[#0D9488]">{lastReceipt}</strong></p>
+                </div>
+                <button
+                  onClick={() => setPayingPremium(null)}
+                  className="bg-[#0D9488] text-white text-xs font-bold px-6 py-2 rounded-xl cursor-pointer"
+                >
+                  Done & Close
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Claim Documents Viewer Modal */}
+      {showDocsModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl border border-gray-100 p-6 max-w-lg w-full space-y-4 animate-fade-in-down">
+            <div className="flex justify-between items-center border-b border-gray-100 pb-3">
+              <div>
+                <h4 className="font-bold text-sm text-[#0A1628]">Attached Clinical Documents</h4>
+                <span className="text-[10px] text-gray-400 font-mono">{docsModalTitle}</span>
+              </div>
+              <button onClick={() => setShowDocsModal(false)} className="text-gray-400 hover:text-gray-600 font-bold text-sm cursor-pointer">✕</button>
+            </div>
+
+            {loadingDocs ? (
+              <div className="py-8 text-center text-xs text-gray-400 flex items-center justify-center gap-2 font-mono">
+                <RefreshCw className="h-4 w-4 animate-spin text-[#0D9488]" /> Fetching attached documents...
+              </div>
+            ) : viewingClaimDocs.length === 0 ? (
+              <div className="py-8 text-center text-xs text-gray-400">
+                No electronic document attachments filed with this claim.
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {viewingClaimDocs.map((d: any) => (
+                  <div key={d.id} className="p-3 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-[#0D9488]" />
+                      <div>
+                        <span className="text-xs font-bold text-gray-800 block truncate max-w-[200px]">{d.file_name}</span>
+                        <span className="text-[9px] text-gray-400 font-mono">{(d.file_size / 1024).toFixed(0)} KB</span>
+                      </div>
+                    </div>
+                    {d.signed_url ? (
+                      <a
+                        href={d.signed_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="bg-[#0D9488] text-white text-[10px] font-bold px-3 py-1.5 rounded-lg hover:bg-[#0b7e74]"
+                      >
+                        View File
+                      </a>
+                    ) : (
+                      <span className="text-[9px] text-gray-400 font-mono">Link Expired</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
     </div>

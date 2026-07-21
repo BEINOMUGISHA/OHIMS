@@ -26,7 +26,7 @@ import {
 import { jsPDF } from 'jspdf';
 import { User, Claim, Policy, Premium } from '../types';
 import {
-  claimsApi, policiesApi, premiumsApi, providersApi, plansApi, settingsApi, auditApi
+  claimsApi, policiesApi, premiumsApi, providersApi, plansApi, settingsApi, auditApi, usersApi
 } from '../lib/api';
 
 interface StaffDashboardProps {
@@ -39,7 +39,13 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
   const [policies, setPolicies] = useState<any[]>([]);
   const [premiums, setPremiums] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'claims' | 'policies' | 'reminders' | 'providers' | 'plans' | 'settings' | 'logs'>('claims');
+  const [activeTab, setActiveTab] = useState<'claims' | 'policies' | 'members' | 'reminders' | 'providers' | 'plans' | 'settings' | 'logs'>('claims');
+
+  // Members Management states
+  const [membersList, setMembersList] = useState<any[]>([]);
+  const [memberSearch, setMemberSearch] = useState('');
+  const [memberActionLoading, setMemberActionLoading] = useState(false);
+  const [memberActionMsg, setMemberActionMsg] = useState('');
 
   // Provider states
   const [providers, setProviders] = useState<any[]>([]);
@@ -87,7 +93,7 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
     try {
       setLoading(true);
 
-      const [claimsData, polData, premData, provData, plansData, settingsData, logsData] =
+      const [claimsData, polData, premData, provData, plansData, settingsData, logsData, membersData] =
         await Promise.all([
           claimsApi.list(),
           policiesApi.list(),
@@ -96,6 +102,7 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
           plansApi.list(),
           settingsApi.get(),
           auditApi.list(),
+          usersApi.listMembers(),
         ]);
 
       setClaims(claimsData as unknown as Claim[]);
@@ -104,6 +111,7 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
       setProviders(provData);
       setPlans(plansData);
       setAuditLogs(logsData);
+      setMembersList(membersData);
 
       setSettingsAllowAuto(settingsData.allowAutoApprovalOfLowClaims);
       setSettingsThreshold(settingsData.lowClaimThreshold.toString());
@@ -115,6 +123,62 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSuspendMember = async (userId: string) => {
+    if (!window.confirm('Are you sure you want to suspend this member and their active policies?')) return;
+    setMemberActionLoading(true);
+    try {
+      await usersApi.suspend(userId, currentUser.id, currentUser.name);
+      setMemberActionMsg('Member and active policy suspended successfully.');
+      const updated = await usersApi.listMembers(memberSearch);
+      setMembersList(updated);
+      onRefreshData();
+    } catch (e: any) {
+      alert('Failed to suspend member: ' + e.message);
+    } finally {
+      setMemberActionLoading(false);
+    }
+  };
+
+  const handleReinstateMember = async (userId: string) => {
+    setMemberActionLoading(true);
+    try {
+      await usersApi.reinstate(userId, currentUser.id, currentUser.name);
+      setMemberActionMsg('Member and active policy reinstated successfully.');
+      const updated = await usersApi.listMembers(memberSearch);
+      setMembersList(updated);
+      onRefreshData();
+    } catch (e: any) {
+      alert('Failed to reinstate member: ' + e.message);
+    } finally {
+      setMemberActionLoading(false);
+    }
+  };
+
+  const handleSearchMembers = async (query: string) => {
+    setMemberSearch(query);
+    try {
+      const results = await usersApi.listMembers(query);
+      setMembersList(results);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const getClaimSlaInfo = (c: any) => {
+    const dateStr = c.date_filed || c.submitted_at || c.created_at;
+    if (!dateStr) return { minutes: 0, status: 'ok', label: 'On Track' };
+    const filedTime = new Date(dateStr).getTime();
+    const nowTime = new Date().getTime();
+    const diffMinutes = Math.floor((nowTime - filedTime) / (1000 * 60));
+
+    if (diffMinutes > 15) {
+      return { minutes: diffMinutes, status: 'breached', label: `${diffMinutes}m SLA Breached` };
+    } else if (diffMinutes > 10) {
+      return { minutes: diffMinutes, status: 'warning', label: `${diffMinutes}m At Risk` };
+    }
+    return { minutes: diffMinutes, status: 'ok', label: `${diffMinutes}m On Track` };
   };
 
   useEffect(() => {
@@ -479,10 +543,11 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-gray-200">
+      <div className="flex border-b border-gray-200 overflow-x-auto scrollbar-thin whitespace-nowrap">
         {[
           { id: 'claims', label: `Pending Claims Pipeline (${claims.filter(c=>c.status==='submitted'||c.status==='under_review').length})` },
           { id: 'policies', label: 'Coverage Policies & suspensions' },
+          { id: 'members', label: '👥 Member Management & Suspensions' },
           { id: 'reminders', label: 'Premium Billing & reminders' },
           { id: 'providers', label: 'Healthcare Partners & Clinic status' },
           { id: 'plans', label: 'Insurance Policy plans Editor' },
@@ -492,7 +557,7 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
           <button
             key={t.id}
             onClick={() => setActiveTab(t.id as any)}
-            className={`py-3 px-4 font-bold text-xs border-b-2 transition-colors ${activeTab === t.id ? 'border-[#0D9488] text-[#0D9488]' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+            className={`py-3 px-4 font-bold text-xs border-b-2 transition-colors flex-shrink-0 ${activeTab === t.id ? 'border-[#0D9488] text-[#0D9488]' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
           >
             {t.label}
           </button>
@@ -502,6 +567,42 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
       {/* ==================== TAB 1 CLAIMS ADJUDICATION ==================== */}
       {activeTab === 'claims' && (
         <div className="space-y-6">
+          {/* SLA Telemetry Header Banner */}
+          {(() => {
+            const pendingClaims = claims.filter(c => c.status === 'submitted' || c.status === 'under_review');
+            const slaBreachedCount = pendingClaims.filter(c => getClaimSlaInfo(c).status === 'breached').length;
+            const slaWarningCount = pendingClaims.filter(c => getClaimSlaInfo(c).status === 'warning').length;
+            const slaOkCount = pendingClaims.filter(c => getClaimSlaInfo(c).status === 'ok').length;
+
+            return (
+              <div className="bg-slate-900 border border-slate-800 text-white p-4 rounded-2xl flex items-center justify-between flex-wrap gap-4 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <div className="bg-red-500/20 text-red-400 p-2.5 rounded-xl border border-red-500/30">
+                    <Clock className="h-6 w-6 animate-pulse" />
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-xs uppercase tracking-wider text-slate-100">Claims SLA Triage Monitor (15-Minute Turnaround Standard)</h4>
+                    <span className="text-[10px] text-slate-400">Automatic priority queue monitoring according to Uganda OHIMS compliance rules</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 text-xs font-mono">
+                  <div className="px-3 py-1.5 bg-red-950/80 border border-red-800/50 rounded-xl flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-red-500 animate-ping" />
+                    <span className="text-red-300 font-bold">{slaBreachedCount} SLA Breached</span>
+                  </div>
+                  <div className="px-3 py-1.5 bg-amber-950/80 border border-amber-800/50 rounded-xl flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-amber-500" />
+                    <span className="text-amber-300 font-bold">{slaWarningCount} At Risk</span>
+                  </div>
+                  <div className="px-3 py-1.5 bg-teal-950/80 border border-teal-800/50 rounded-xl flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-teal-500" />
+                    <span className="text-teal-300 font-bold">{slaOkCount} On Track</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           <h3 className="text-sm font-bold text-gray-400 font-mono uppercase tracking-wider block">Claims Queue Process Panel</h3>
           
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -548,12 +649,21 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
                             </span>
                           ) : c.status === 'approved' || c.status === 'paid' ? (
                             <span className="text-[10px] uppercase font-bold text-teal-700 bg-teal-100 px-2 py-1 rounded">
-                              ✓ PASS
+                              ✓ RESOLVED
                             </span>
                           ) : (
-                            <span className="text-[10px] uppercase font-bold text-blue-700 bg-blue-150 px-2 py-1 rounded">
-                              ● NORMAL
-                            </span>
+                            (() => {
+                              const sla = getClaimSlaInfo(c);
+                              return (
+                                <span className={`text-[10px] uppercase font-bold font-mono px-2 py-1 rounded inline-block ${
+                                  sla.status === 'breached' ? 'bg-red-500 text-white font-black animate-pulse' :
+                                  sla.status === 'warning' ? 'bg-amber-100 text-amber-900 border border-amber-300' :
+                                  'bg-teal-50 text-[#0D9488]'
+                                }`}>
+                                  ⏱️ {sla.label}
+                                </span>
+                              );
+                            })()
                           )}
                         </td>
                         <td className="p-4 text-center">
@@ -750,6 +860,113 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
                       </td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== TAB MEMBER MANAGEMENT ==================== */}
+      {activeTab === 'members' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+            <div>
+              <h3 className="text-lg font-black text-[#0A1628]">Member Management & Account Status</h3>
+              <p className="text-xs text-gray-500">View, search, suspend or reinstate registered policyholders</p>
+            </div>
+            <div className="relative w-full sm:w-72">
+              <Search className="h-4 w-4 absolute left-3 top-3 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search name, email, National ID..."
+                value={memberSearch}
+                onChange={e => handleSearchMembers(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-xs bg-white outline-none focus:ring-1 focus:ring-[#0D9488]"
+              />
+            </div>
+          </div>
+
+          {memberActionMsg && (
+            <div className="p-3 bg-teal-50 text-teal-700 border border-teal-200 rounded-xl text-xs font-bold">
+              {memberActionMsg}
+            </div>
+          )}
+
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left font-sans text-xs">
+                <thead className="bg-[#0A1628] text-white font-mono uppercase tracking-wider text-[10px]">
+                  <tr>
+                    <th className="p-4">Member Name</th>
+                    <th className="p-4">National ID</th>
+                    <th className="p-4">Phone</th>
+                    <th className="p-4">Active Plan</th>
+                    <th className="p-4">Account Status</th>
+                    <th className="p-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {membersList.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-gray-400">
+                        No members found matching query.
+                      </td>
+                    </tr>
+                  ) : (
+                    membersList.map((m: any) => {
+                      const activePolicy = m.policies?.find((p: any) => p.status === 'active') || m.policies?.[0];
+                      const isSuspended = m.status === 'suspended';
+                      return (
+                        <tr key={m.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="p-4">
+                            <div className="flex items-center gap-3">
+                              <div className="h-8 w-8 rounded-full bg-teal-800 text-white font-mono font-bold flex items-center justify-center text-xs">
+                                {m.name?.[0]?.toUpperCase()}
+                              </div>
+                              <div>
+                                <span className="font-bold text-[#0A1628] block">{m.name}</span>
+                                <span className="text-[10px] text-gray-400 font-mono">{m.email}</span>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-4 font-mono text-gray-700 font-semibold">{m.national_id || 'N/A'}</td>
+                          <td className="p-4 font-mono text-gray-500">{m.phone || 'N/A'}</td>
+                          <td className="p-4">
+                            <span className="bg-teal-50 text-[#0D9488] font-bold font-mono text-[10px] uppercase px-2 py-0.5 rounded border border-teal-100">
+                              {activePolicy?.plans?.name || 'Standard Plan'}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            <span className={`text-[10px] uppercase font-bold font-mono px-2 py-0.5 rounded ${
+                              isSuspended ? 'bg-red-100 text-red-800 border border-red-200' : 'bg-emerald-100 text-emerald-800'
+                            }`}>
+                              ● {m.status || 'active'}
+                            </span>
+                          </td>
+                          <td className="p-4 text-right space-x-2">
+                            {isSuspended ? (
+                              <button
+                                onClick={() => handleReinstateMember(m.id)}
+                                disabled={memberActionLoading}
+                                className="bg-teal-600 hover:bg-teal-700 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg shadow-sm cursor-pointer"
+                              >
+                                Reinstate
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleSuspendMember(m.id)}
+                                disabled={memberActionLoading}
+                                className="bg-red-500 hover:bg-red-600 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg shadow-sm cursor-pointer"
+                              >
+                                Suspend
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>

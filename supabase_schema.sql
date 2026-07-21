@@ -50,6 +50,7 @@ create table public.profiles (
     phone           text,
     avatar_url      text,
     password_hash   text,
+    status          text default 'active' check (status in ('active','suspended')),
     created_at      timestamptz default now() not null,
     updated_at      timestamptz default now() not null
 );

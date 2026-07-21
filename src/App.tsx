@@ -177,14 +177,29 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Poll notifications every 10 seconds when logged in
+  // Realtime notification subscription — instant delivery instead of polling
   useEffect(() => {
     if (!currentUser) return;
-    const interval = setInterval(() => {
-      fetchNotifications(currentUser.id);
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [currentUser]);
+    // Fetch immediately on login
+    fetchNotifications(currentUser.id);
+
+    // Subscribe to new rows on the notifications table for this user
+    const channel = supabase
+      .channel(`notifications:${currentUser.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${currentUser.id}`,
+        },
+        () => fetchNotifications(currentUser.id)
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [currentUser?.id]);
 
   if (loading) {
     return (

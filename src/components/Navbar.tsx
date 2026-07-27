@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Shield,
   Bell,
@@ -11,18 +12,16 @@ import {
   AlertTriangle,
   Info,
   LogOut,
-  User as UserIcon,
   RefreshCw,
   Clock,
-  Menu,
   Sun,
-  Moon
+  Moon,
+  UserPlus
 } from 'lucide-react';
 import { User, Notification } from '../types';
 
 interface NavbarProps {
   currentUser: User | null;
-  onLoginRequest: () => void;
   onLogout: () => void;
   onUserSelected: (userTokenId: string) => void;
   allUsers: User[];
@@ -35,7 +34,6 @@ interface NavbarProps {
 
 export default function Navbar({
   currentUser,
-  onLoginRequest,
   onLogout,
   onUserSelected,
   allUsers,
@@ -45,9 +43,14 @@ export default function Navbar({
   theme,
   onToggleTheme
 }: NavbarProps) {
+  const navigate = useNavigate();
   const [showNotificationDropdown, setShowNotificationDropdown] = useState(false);
-  const [showSandboxDropdown, setShowSandboxDropdown] = useState(false);
   const unreadCount = notifications.filter(n => !n.read).length;
+
+  const handleLogoutClick = () => {
+    onLogout();
+    navigate('/login');
+  };
 
   return (
     <header className="bg-[#0A1628] text-white sticky top-0 z-40 shadow-md border-b border-gray-800">
@@ -55,15 +58,22 @@ export default function Navbar({
         <div className="flex items-center justify-between h-16">
           
           {/* Logo & Platform Name */}
-          <div className="flex items-center space-x-3 cursor-pointer">
-            <div className="bg-[#0D9488] p-2 rounded-lg text-white">
+          <Link
+            to={currentUser ? "/dashboard" : "/"}
+            className="flex items-center space-x-3 cursor-pointer group"
+          >
+            <div className="bg-[#0D9488] p-2 rounded-lg text-white group-hover:bg-[#0b7e74] transition-all">
               <Shield className="h-6 w-6" />
             </div>
             <div>
-              <span className="font-extrabold tracking-tight text-white block text-sm sm:text-base">Online Health Insurance Management System (OHIMS)</span>
-              <span className="text-[10px] text-teal-400 font-mono uppercase tracking-wider block font-bold">Uganda Coverage Hub</span>
+              <span className="font-extrabold tracking-tight text-white block text-sm sm:text-base">
+                Online Health Insurance Management System (OHIMS)
+              </span>
+              <span className="text-[10px] text-teal-400 font-mono uppercase tracking-wider block font-bold">
+                Uganda Coverage Hub
+              </span>
             </div>
-          </div>
+          </Link>
 
           {/* Sandbox Role Quick Changer */}
           <div className="hidden md:flex items-center bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 space-x-2">
@@ -75,8 +85,10 @@ export default function Navbar({
               onChange={(e) => {
                 if (e.target.value === 'guest') {
                   onLogout();
+                  navigate('/login');
                 } else {
                   onUserSelected(e.target.value);
+                  navigate('/dashboard');
                 }
               }}
               className="bg-transparent text-xs text-gray-200 outline-none border-none font-medium cursor-pointer max-w-[200px]"
@@ -91,7 +103,7 @@ export default function Navbar({
           </div>
 
           {/* Main User Actions & Notification Panel Component */}
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-3 sm:space-x-4">
             
             {/* Global Theme Toggle Button */}
             <button
@@ -107,16 +119,13 @@ export default function Navbar({
               )}
             </button>
             
-            {/* Notification Bell with Dropdown (Transparency requirements) */}
+            {/* Notification Bell with Dropdown */}
             {currentUser && (
               <div className="relative">
                 <button
                   id="navbar-notification-btn"
-                  onClick={() => {
-                    setShowNotificationDropdown(!showNotificationDropdown);
-                    setShowSandboxDropdown(false);
-                  }}
-                  className="p-2 text-gray-300 hover:text-white hover:bg-gray-800 rounded-full transition-colors relative"
+                  onClick={() => setShowNotificationDropdown(!showNotificationDropdown)}
+                  className="p-2 text-gray-300 hover:text-white hover:bg-gray-800 rounded-full transition-colors relative cursor-pointer"
                 >
                   <Bell className="h-5 w-5" />
                   {unreadCount > 0 && (
@@ -127,16 +136,16 @@ export default function Navbar({
                 </button>
 
                 {showNotificationDropdown && (
-                  <div className="absolute right-0 mt-2 w-80 bg-white text-gray-900 rounded-xl shadow-2xl border border-gray-100 py-2 z-50 animate-fade-in-down">
-                    <div className="px-4 py-2 border-b border-gray-100 flex items-center justify-between">
-                      <span className="font-bold text-sm text-gray-900">Notifications ({unreadCount} unread)</span>
+                  <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-slate-900 text-gray-900 dark:text-white rounded-xl shadow-2xl border border-gray-100 dark:border-slate-800 py-2 z-50 animate-fade-in-down">
+                    <div className="px-4 py-2 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between">
+                      <span className="font-bold text-sm text-gray-900 dark:text-white">Notifications ({unreadCount} unread)</span>
                       {notifications.length > 0 && (
                         <button
                           onClick={() => {
                             onClearAllNotifications();
                             setShowNotificationDropdown(false);
                           }}
-                          className="text-xs text-[#0D9488] hover:underline font-semibold"
+                          className="text-xs text-[#0D9488] hover:underline font-semibold cursor-pointer"
                         >
                           Mark all read
                         </button>
@@ -152,7 +161,7 @@ export default function Navbar({
                         notifications.map((not) => (
                           <div
                             key={not.id}
-                            className={`px-4 py-3 border-b border-gray-50 flex items-start space-x-3 transition-colors ${not.read ? 'opacity-60 bg-white' : 'bg-teal-50/40'}`}
+                            className={`px-4 py-3 border-b border-gray-50 dark:border-slate-800 flex items-start space-x-3 transition-colors ${not.read ? 'opacity-60 bg-white dark:bg-slate-900' : 'bg-teal-50/40 dark:bg-teal-950/20'}`}
                           >
                             <div className="mt-0.5">
                               {not.type === 'success' ? (
@@ -164,7 +173,7 @@ export default function Navbar({
                               )}
                             </div>
                             <div className="flex-1">
-                              <p className="text-xs font-medium text-gray-800 leading-relaxed">{not.message}</p>
+                              <p className="text-xs font-medium text-gray-800 dark:text-gray-200 leading-relaxed">{not.message}</p>
                               <div className="flex items-center space-x-1 mt-1 text-[9px] text-gray-400">
                                 <Clock className="h-2.5 w-2.5" />
                                 <span>{new Date(not.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
@@ -173,7 +182,7 @@ export default function Navbar({
                             {!not.read && (
                               <button
                                 onClick={() => onMarkNotificationRead(not.id)}
-                                className="text-[9px] text-[#0D9488] hover:underline font-bold mt-0.5"
+                                className="text-[9px] text-[#0D9488] hover:underline font-bold mt-0.5 cursor-pointer"
                               >
                                 Dismiss
                               </button>
@@ -187,7 +196,7 @@ export default function Navbar({
               </div>
             )}
 
-            {/* Profile Avatar & Login/Logout Action Trigger */}
+            {/* Profile Avatar & Navigation Links */}
             {currentUser ? (
               <div className="flex items-center space-x-3 pl-2 border-l border-gray-800">
                 <div className="hidden lg:block text-right">
@@ -201,21 +210,30 @@ export default function Navbar({
                 </div>
                 <button
                   id="navbar-logout-btn"
-                  onClick={onLogout}
-                  className="p-2 text-gray-400 hover:text-red-400 hover:bg-gray-800 rounded-full transition-colors"
+                  onClick={handleLogoutClick}
+                  className="p-2 text-gray-400 hover:text-red-400 hover:bg-gray-800 rounded-full transition-colors cursor-pointer"
                   title="Logout"
                 >
                   <LogOut className="h-4 w-4" />
                 </button>
               </div>
             ) : (
-              <button
-                id="navbar-login-btn"
-                onClick={onLoginRequest}
-                className="bg-[#0D9488] hover:bg-[#0b7e74] text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition-all"
-              >
-                Sign In
-              </button>
+              <div className="flex items-center space-x-2">
+                <Link
+                  to="/register"
+                  className="hidden sm:inline-flex items-center gap-1 text-xs text-slate-300 hover:text-white font-medium px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors"
+                >
+                  <UserPlus className="h-3.5 w-3.5 text-[#0D9488]" />
+                  <span>Register</span>
+                </Link>
+                <Link
+                  to="/login"
+                  id="navbar-login-btn"
+                  className="bg-[#0D9488] hover:bg-[#0b7e74] text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition-all"
+                >
+                  Sign In
+                </Link>
+              </div>
             )}
           </div>
         </div>

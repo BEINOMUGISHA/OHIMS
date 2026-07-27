@@ -2,18 +2,19 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * OHIMS Uganda — App Root
- * All auth + data operations now go through src/lib/api.ts (Supabase-native).
- * No Express server required — works fully on GitHub Pages.
+ * OHIMS Uganda — App Root with Page-Based Routing
+ * Configured with HashRouter for zero-config GitHub Pages sub-route support.
  */
 
 import React, { useState, useEffect } from 'react';
+import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Navbar from './components/Navbar';
-import PublicLanding from './components/PublicLanding';
-import AuthModal from './components/AuthModal';
-import MemberDashboard from './components/MemberDashboard';
-import StaffDashboard from './components/StaffDashboard';
-import ProviderDashboard from './components/ProviderDashboard';
+import LandingPage from './pages/LandingPage';
+import Login from './pages/Login';
+import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import DashboardPage from './pages/DashboardPage';
+import ProtectedRoute from './components/ProtectedRoute';
 import { User, Notification, InsurancePlan } from './types';
 import { RefreshCw, ShieldCheck } from 'lucide-react';
 import { supabase } from './lib/supabase';
@@ -29,7 +30,6 @@ export default function App() {
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [plans, setPlans] = useState<InsurancePlan[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [showAuthModal, setShowAuthModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('ohims_theme');
@@ -87,7 +87,7 @@ export default function App() {
     }
   };
 
-  // Called after login success — userId is the Supabase user id
+  // Called after login/register success
   const handleLoginSuccess = async (userId: string) => {
     setLoading(true);
     await restoreSession();
@@ -97,8 +97,6 @@ export default function App() {
   // Handle sandbox user switcher
   const handleUserSwap = async (userId: string) => {
     setLoading(true);
-    // Sign in as that user is not possible without password from client-side.
-    // Instead, just load profile directly for demo sandbox display.
     try {
       const { data: profile } = await supabase
         .from('profiles')
@@ -177,13 +175,11 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Realtime notification subscription — instant delivery instead of polling
+  // Realtime notification subscription
   useEffect(() => {
     if (!currentUser) return;
-    // Fetch immediately on login
     fetchNotifications(currentUser.id);
 
-    // Subscribe to new rows on the notifications table for this user
     const channel = supabase
       .channel(`notifications:${currentUser.id}`)
       .on(
@@ -222,54 +218,57 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col font-sans selection:bg-[#0D9488]/20 selection:text-[#0D9488] transition-colors duration-200">
-      {/* Platform Navigation rail */}
-      <Navbar
-        currentUser={currentUser}
-        onLoginRequest={() => setShowAuthModal(true)}
-        onLogout={handleLogout}
-        onUserSelected={handleUserSwap}
-        allUsers={allUsers}
-        notifications={notifications}
-        onMarkNotificationRead={handleMarkNotificationRead}
-        onClearAllNotifications={handleClearAllNotifications}
-        theme={theme}
-        onToggleTheme={handleToggleTheme}
-      />
-
-      {/* Main viewport rendering layout based on User roles */}
-      <main className="flex-1 pb-16">
-        {!currentUser ? (
-          <PublicLanding
-            plans={plans}
-            onOpenAuth={() => setShowAuthModal(true)}
-          />
-        ) : currentUser.role === 'admin' || currentUser.role === 'staff' ? (
-          <StaffDashboard
-            currentUser={currentUser}
-            onRefreshData={handleRefreshAllData}
-          />
-        ) : currentUser.role === 'provider' ? (
-          <ProviderDashboard
-            currentUser={currentUser}
-            onRefreshData={handleRefreshAllData}
-          />
-        ) : (
-          <MemberDashboard
-            currentUser={currentUser}
-            onRefreshData={handleRefreshAllData}
-          />
-        )}
-      </main>
-
-      {/* Auth Modal */}
-      {showAuthModal && (
-        <AuthModal
-          plans={plans}
-          onDismiss={() => setShowAuthModal(false)}
-          onLoginSuccess={handleLoginSuccess}
+    <Router>
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col font-sans selection:bg-[#0D9488]/20 selection:text-[#0D9488] transition-colors duration-200">
+        <Navbar
+          currentUser={currentUser}
+          onLogout={handleLogout}
+          onUserSelected={handleUserSwap}
+          allUsers={allUsers}
+          notifications={notifications}
+          onMarkNotificationRead={handleMarkNotificationRead}
+          onClearAllNotifications={handleClearAllNotifications}
+          theme={theme}
+          onToggleTheme={handleToggleTheme}
         />
-      )}
-    </div>
+
+        <main className="flex-1 pb-16">
+          <Routes>
+            <Route path="/" element={<LandingPage plans={plans} />} />
+            
+            <Route
+              path="/login"
+              element={
+                currentUser ? <Navigate to="/dashboard" replace /> : <Login onLoginSuccess={handleLoginSuccess} />
+              }
+            />
+
+            <Route
+              path="/register"
+              element={
+                currentUser ? <Navigate to="/dashboard" replace /> : <Register plans={plans} onLoginSuccess={handleLoginSuccess} />
+              }
+            />
+
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute currentUser={currentUser}>
+                  <DashboardPage
+                    currentUser={currentUser!}
+                    onRefreshData={handleRefreshAllData}
+                  />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Fallback route */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </main>
+      </div>
+    </Router>
   );
 }

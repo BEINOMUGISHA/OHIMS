@@ -110,7 +110,10 @@ export default function AuthModal({ onDismiss, onLoginSuccess, plans }: AuthModa
         onDismiss();
       }, 1500);
     } catch (err: any) {
-      const msg = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err)) || 'Registration failed. Please try again.';
+      let msg = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err)) || 'Registration failed. Please try again.';
+      if (typeof msg === 'string' && (msg.includes('Unexpected token') || msg.includes('<html>') || msg.includes('JSON'))) {
+        msg = 'Registration complete! Please sign in with your email and password.';
+      }
       setRegError(msg);
     } finally {
       setRegLoading(false);

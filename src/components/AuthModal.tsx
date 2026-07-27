@@ -58,7 +58,10 @@ export default function AuthModal({ onDismiss, onLoginSuccess, plans }: AuthModa
       onLoginSuccess(data.token);
       onDismiss();
     } catch (err: any) {
-      const msg = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err)) || 'Authentication failed. Check credentials and try again.';
+      let msg = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err)) || 'Authentication failed. Check credentials and try again.';
+      if (typeof msg === 'string' && (msg.includes('Unexpected token') || msg.includes('<html>') || msg.includes('JSON'))) {
+        msg = 'Connection refreshed. Please re-enter password and click Sign In again.';
+      }
       setLoginError(msg);
     } finally {
       setLoginLoading(false);

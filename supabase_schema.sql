@@ -42,7 +42,7 @@ create table public.profiles (
     id              uuid primary key references auth.users(id) on delete cascade,
     email           text not null unique,
     name            text not null,
-    role            text not null check (role in ('member','provider','staff')),
+    role            text not null check (role in ('member','provider','staff','admin')),
     national_id     text,
     dob             date,
     gender          text check (gender in ('male','female','other')),
@@ -248,7 +248,11 @@ begin
         new.email,
         coalesce(new.raw_user_meta_data->>'name', split_part(new.email, '@', 1)),
         coalesce(new.raw_user_meta_data->>'role', 'member')
-    );
+    )
+    on conflict (id) do update set
+        email = excluded.email,
+        name = excluded.name,
+        role = excluded.role;
     return new;
 end;
 $$;
@@ -579,73 +583,8 @@ values
 )
 on conflict (id) do nothing;
 
--- =====================================================================
--- SEED DATA: Sandbox Demo Accounts (Supabase Auth Users & Profiles)
--- =====================================================================
-
--- Helper function to seed Auth Users securely with hashed passwords
-create or replace function public.seed_auth_user(
-    u_id uuid,
-    u_email text,
-    u_password text,
-    u_name text,
-    u_role text
-) returns void language plpgsql security definer as $$
-begin
-    if not exists (select 1 from auth.users where email = u_email) then
-        insert into auth.users (
-            id,
-            instance_id,
-            email,
-            encrypted_password,
-            email_confirmed_at,
-            raw_app_meta_data,
-            raw_user_meta_data,
-            created_at,
-            updated_at,
-            role,
-            aud,
-            confirmed_at
-        ) values (
-            u_id,
-            '00000000-0000-0000-0000-000000000000'::uuid,
-            u_email,
-            crypt(u_password, gen_salt('bf', 10)),
-            now(),
-            '{"provider": "email", "providers": ["email"]}'::jsonb,
-            jsonb_build_object('name', u_name, 'role', u_role),
-            now(),
-            now(),
-            'authenticated',
-            'authenticated',
-            now()
-        );
-    end if;
-end;
-$$;
-
--- Seed sandbox accounts in auth.users (which triggers profiles auto-creation)
-select public.seed_auth_user('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid, 'admin@ohims.gov.ug', 'admin123', 'System Administrator', 'staff');
-select public.seed_auth_user('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12'::uuid, 'staff@ohims.gov.ug', 'staff123', 'Staff Adjuster', 'staff');
-select public.seed_auth_user('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a13'::uuid, 'mulago@ohims.gov.ug', 'provider123', 'Mulago Partner', 'provider');
-select public.seed_auth_user('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a14'::uuid, 'beinomugishainnocent2001@gmail.com', 'member123', 'Beinomugisha Innocent', 'member');
-select public.seed_auth_user('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a15'::uuid, 'member@ohims.gov.ug', 'member123', 'Demo Member', 'member');
-
--- Enrich profiles table with profile details
-update public.profiles
-set phone = '+256414540131', gender = 'male', dob = '1985-01-01', address = 'Kampala'
-where id = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a13'::uuid;
-
-update public.profiles
-set phone = '+256755949229', national_id = 'CM01037AGV2G', dob = '1998-05-15', gender = 'male', address = 'Kabale'
-where id = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a14'::uuid;
-
-update public.profiles
-set phone = '+256700111222', national_id = 'CM02047ZGV4G', dob = '1995-10-12', gender = 'female', address = 'Kampala'
-where id = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a15'::uuid;
-
--- Clean up helper function
-drop function if exists public.seed_auth_user(uuid, text, text, text, text);
+-- Note: Demo users are created naturally via Supabase Auth (signUp)
+-- or registered via the UI. Avoid manual SQL INSERT into auth.users.
 
 -- =====================================================================
 -- SEED DATA: Seed active policies, premiums, claims, and notifications

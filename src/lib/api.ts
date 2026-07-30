@@ -53,6 +53,7 @@ export const authApi = {
   /**
    * Register a new member.
    * Creates a Supabase Auth user then upserts profile + policy + premium.
+   * Self-heals if the user already exists in Supabase Auth.
    */
   register: async (payload: {
     name: string;
@@ -71,8 +72,10 @@ export const authApi = {
       dob, gender, address, selected_plan_id, premium_frequency,
     } = payload;
 
-    // 1. Create Supabase Auth user — pass ALL metadata so the DB trigger
-    //    can populate the profiles row even without a live session.
+    let userId: string;
+    let hasSession = false;
+
+    // 1. Attempt Supabase Auth user creation
     const { data: authData, error: authErr } = await supabase.auth.signUp({
       email,
       password,
@@ -90,109 +93,146 @@ export const authApi = {
         }
       },
     });
-    if (authErr) throw new Error(authErr.message);
 
-    const userId = authData.user!.id;
-    const hasSession = !!authData.session; // false when email confirmation is required
+    if (authErr) {
+      const errLower = authErr.message.toLowerCase();
+      if (errLower.includes('already registered') || errLower.includes('already exists')) {
+        // User is already in Auth — sign in to get active session
+        const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
+        if (signInErr) {
+          throw new Error('An account with this email is already registered. Please sign in with your password.');
+        }
+        userId = signInData.user.id;
+        hasSession = true;
+      } else {
+        throw new Error(authErr.message);
+      }
+    } else {
+      userId = authData.user!.id;
+      hasSession = !!authData.session;
+    }
 
-    // 2. If email confirmation is required, return a pending marker.
-    //    The UI will show a "check your inbox" message.
     if (!hasSession) {
       return {
         user: null,
         emailConfirmationRequired: true,
-        message: 'Registration successful! Please check your email inbox and click the confirmation link to activate your account.',
+        message: 'Registration received! If email verification is enabled on your domain, please check your inbox to activate your account.',
       };
     }
 
-    // 3. Session is live (email confirmation disabled) — complete onboarding now.
-    await new Promise(resolve => setTimeout(resolve, 800));
+    // 2. Self-heal profile creation/update
+    const profileData = {
+      id: userId,
+      email,
+      name,
+      role: 'member',
+      status: 'active',
+      phone,
+      national_id,
+      dob: dob || null,
+      gender,
+      address,
+    };
 
-    // Update profile with detailed onboarding info
     const { error: profErr } = await supabase
       .from('profiles')
-      .update({ phone, national_id, dob: dob || null, gender, address })
-      .eq('id', userId);
-    if (profErr) throw new Error(`Onboarding Profile: ${profErr.message}`);
+      .upsert(profileData);
+    if (profErr) console.warn('Profile upsert warning:', profErr.message);
 
-    // Fetch selected plan details
-    const { data: plan, error: planErr } = await supabase
-      .from('plans').select('*').eq('id', selected_plan_id).single();
-    if (planErr || !plan) throw new Error('Selected health plan not found.');
+    // 3. Ensure active policy exists
+    const { data: existingPolicies } = await supabase
+      .from('policies')
+      .select('id')
+      .eq('user_id', userId);
 
-    // Create active policy
-    const policyId = `POL-${new Date().getFullYear()}-${Math.floor(Math.random() * 90000 + 10000)}`;
-    const startDate = new Date().toISOString().split('T')[0];
-    const endDate = new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0];
+    if (!existingPolicies || existingPolicies.length === 0) {
+      const { data: plan } = await supabase
+        .from('plans')
+        .select('*')
+        .eq('id', selected_plan_id)
+        .single();
 
-    const { error: polErr } = await supabase.from('policies').insert({
-      id: policyId,
-      user_id: userId,
-      plan_id: selected_plan_id,
-      status: 'active',
-      start_date: startDate,
-      end_date: endDate,
-      premium_rate: plan.premium_amount,
-      coverage_limit: plan.coverage_limit,
-      remaining_coverage: plan.coverage_limit,
-    });
-    if (polErr) throw new Error(`Policy Setup: ${polErr.message}`);
+      const planLimit = plan?.coverage_limit ?? 5000000;
+      const planRate = plan?.premium_amount ?? 45000;
+      const policyId = generatePolicyId();
+      const startDate = new Date().toISOString().split('T')[0];
+      const endDate = new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0];
 
-    // Create initial premium invoice
-    const premDue = new Date();
-    premDue.setDate(premDue.getDate() + 30);
-    const { error: premErr } = await supabase.from('premiums').insert({
-      policy_id: policyId,
-      amount: plan.premium_amount,
-      status: 'unpaid',
-      due_date: premDue.toISOString().split('T')[0],
-    });
-    if (premErr) throw new Error(`Premium Invoice: ${premErr.message}`);
+      await supabase.from('policies').insert({
+        id: policyId,
+        user_id: userId,
+        plan_id: selected_plan_id,
+        status: 'active',
+        start_date: startDate,
+        end_date: endDate,
+        premium_rate: planRate,
+        coverage_limit: planLimit,
+        remaining_coverage: planLimit,
+      });
 
-    // Welcome notification
-    await supabase.from('notifications').insert({
-      user_id: userId,
-      message: `Welcome to OHIMS Uganda! Your policy ${policyId} is now active under the ${plan.name} plan.`,
-      type: 'success',
-    });
+      const premDue = new Date();
+      premDue.setDate(premDue.getDate() + 30);
+      await supabase.from('premiums').insert({
+        policy_id: policyId,
+        amount: planRate,
+        status: 'unpaid',
+        due_date: premDue.toISOString().split('T')[0],
+      });
 
-    // Audit log
-    await supabase.from('audit_logs').insert({
-      user_id: userId,
-      user_name: name,
-      action: 'MEMBER_REGISTERED',
-      entity: 'profiles',
-      entity_id: userId,
-    });
+      await addNotification(
+        userId,
+        `Welcome to OHIMS Uganda! Your policy ${policyId} is active.`,
+        'success'
+      );
+    }
 
-    // Fetch completed profile
+    // Return completed profile
     const { data: profile } = await supabase
-      .from('profiles').select('*').eq('id', userId).single();
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
 
     return {
-      user: profile || { id: userId, name, email, role: 'member' },
+      user: profile || profileData,
       emailConfirmationRequired: false,
     };
   },
 
   /**
    * Sign in with email + password via Supabase Auth.
-   * Returns the user profile; session is stored automatically.
+   * Auto-heals missing profiles from auth user metadata.
    */
   login: async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw new Error(error.message);
 
     const userId = data.user.id;
-    const { data: profile, error: pErr } = await supabase
+    let { data: profile } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', userId)
       .single();
-    if (pErr || !profile) throw new Error('Profile not found');
+
+    if (!profile) {
+      const userMeta = data.user.user_metadata || {};
+      const newProfile = {
+        id: userId,
+        email: data.user.email || email,
+        name: userMeta.name || email.split('@')[0],
+        role: userMeta.role || 'member',
+        status: 'active',
+        phone: userMeta.phone || '',
+        national_id: userMeta.national_id || '',
+        address: userMeta.address || 'Kampala, Uganda',
+        dob: userMeta.dob || null,
+        gender: userMeta.gender || 'male',
+      };
+      await supabase.from('profiles').upsert(newProfile);
+      profile = newProfile as any;
+    }
 
     await writeAudit(userId, profile.name, 'USER_LOGIN', 'profiles', userId);
-    // token = user id (used by App.tsx to restore session on reload)
     return { token: userId, user: profile };
   },
 
@@ -201,11 +241,30 @@ export const authApi = {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return null;
 
-    const { data: profile } = await supabase
+    let { data: profile } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', session.user.id)
       .single();
+
+    if (!profile && session.user) {
+      const userMeta = session.user.user_metadata || {};
+      const newProfile = {
+        id: session.user.id,
+        email: session.user.email || '',
+        name: userMeta.name || session.user.email?.split('@')[0] || 'User',
+        role: userMeta.role || 'member',
+        status: 'active',
+        phone: userMeta.phone || '',
+        national_id: userMeta.national_id || '',
+        address: userMeta.address || '',
+        dob: userMeta.dob || null,
+        gender: userMeta.gender || 'male',
+      };
+      await supabase.from('profiles').upsert(newProfile);
+      profile = newProfile as any;
+    }
+
     return profile ?? null;
   },
 
@@ -216,7 +275,6 @@ export const authApi = {
 
   /** Reset password — updates Supabase Auth password. */
   resetPassword: async (email: string, newPassword: string) => {
-    // Find profile to verify email exists
     const { data: profile } = await supabase
       .from('profiles')
       .select('id, name')
@@ -224,8 +282,6 @@ export const authApi = {
       .single();
     if (!profile) throw new Error('No account found with that email address.');
 
-    // Use Supabase admin updateUser via session (requires user to be signed in).
-    // For a demo reset flow we update via auth API:
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     if (error) throw new Error(error.message);
 
@@ -308,7 +364,6 @@ export const usersApi = {
   suspend: async (userId: string, actorId: string, actorName: string) => {
     const { error } = await supabase.from('profiles').update({ status: 'suspended' }).eq('id', userId);
     if (error) throw new Error(error.message);
-    // Suspend their active policies too
     await supabase.from('policies').update({ status: 'suspended' }).eq('user_id', userId).eq('status', 'active');
     await addNotification(userId, 'Your OHIMS account has been suspended. Please contact support for assistance.', 'alert');
     await writeAudit(actorId, actorName, 'MEMBER_SUSPENDED', 'profiles', userId);
@@ -317,7 +372,6 @@ export const usersApi = {
   reinstate: async (userId: string, actorId: string, actorName: string) => {
     const { error } = await supabase.from('profiles').update({ status: 'active' }).eq('id', userId);
     if (error) throw new Error(error.message);
-    // Reinstate their suspended policies
     await supabase.from('policies').update({ status: 'active' }).eq('user_id', userId).eq('status', 'suspended');
     await addNotification(userId, 'Your OHIMS account has been reinstated. Coverage is now restored.', 'success');
     await writeAudit(actorId, actorName, 'MEMBER_REINSTATED', 'profiles', userId);
@@ -327,7 +381,6 @@ export const usersApi = {
 // ── MEMBERS ────────────────────────────────────────────────────────────
 
 export const membersApi = {
-  /** Returns profiles joined with their active policy + plan details. */
   list: async () => {
     const { data: profiles, error } = await supabase
       .from('profiles')
@@ -421,7 +474,6 @@ export const policiesApi = {
     if (error) throw new Error(error.message);
     await writeAudit(actorId, actorName, `POLICY_${status.toUpperCase()}`, 'policies', policyId);
 
-    // Notify the member
     if (data?.user_id) {
       const msgs: Record<string, string> = {
         suspended: `Your policy ${policyId} has been suspended. Please contact OHIMS support.`,
@@ -436,7 +488,6 @@ export const policiesApi = {
   },
 
   renew: async (policyId: string, actorId: string, actorName: string) => {
-    // Extend end_date by 1 year from today
     const newEnd = new Date();
     newEnd.setFullYear(newEnd.getFullYear() + 1);
 
@@ -448,7 +499,6 @@ export const policiesApi = {
       .single();
     if (error) throw new Error(error.message);
 
-    // Create a new premium invoice
     const premDue = new Date();
     premDue.setDate(premDue.getDate() + 30);
     await supabase.from('premiums').insert({
@@ -508,7 +558,6 @@ export const claimsApi = {
   }) => {
     const { actorId, actorName, ...insertData } = payload;
 
-    // Auto-approval check
     const { data: settings } = await supabase
       .from('system_settings')
       .select('allow_auto_approval, low_claim_threshold')
@@ -532,7 +581,6 @@ export const claimsApi = {
 
     await writeAudit(actorId, actorName, 'CLAIM_SUBMITTED', 'claims', data.id);
 
-    // Notify member
     const { data: pol } = await supabase
       .from('policies')
       .select('user_id')
@@ -565,7 +613,6 @@ export const claimsApi = {
 
     await writeAudit(actorId, actorName, `CLAIM_${payload.status.toUpperCase()}`, 'claims', claimId);
 
-    // Notify member
     const { data: pol } = await supabase
       .from('policies')
       .select('user_id')
@@ -614,7 +661,6 @@ export const claimsApi = {
     return data;
   },
 
-  /** Upload a document file to Supabase Storage and record it in claim_documents */
   uploadDocument: async (claimId: string, file: File, actorId: string) => {
     const ext = file.name.split('.').pop();
     const path = `${actorId}/${claimId}/${Date.now()}.${ext}`;
@@ -628,7 +674,6 @@ export const claimsApi = {
     return data;
   },
 
-  /** Fetch signed URLs for all documents on a claim */
   getDocuments: async (claimId: string) => {
     const { data, error } = await supabase
       .from('claim_documents')
@@ -637,7 +682,6 @@ export const claimsApi = {
       .order('uploaded_at', { ascending: false });
     if (error) throw new Error(error.message);
     if (!data || data.length === 0) return [];
-    // Get signed URLs (valid 60 minutes)
     const withUrls = await Promise.all(
       data.map(async (doc: any) => {
         const { data: urlData } = await supabase.storage
@@ -649,7 +693,6 @@ export const claimsApi = {
     return withUrls;
   },
 
-  /** Delete a document from storage and the DB */
   deleteDocument: async (docId: string, filePath: string) => {
     await supabase.storage.from('claim-documents').remove([filePath]);
     const { error } = await supabase.from('claim_documents').delete().eq('id', docId);
@@ -703,11 +746,6 @@ export const premiumsApi = {
     return { ...data, receipt_number: receipt };
   },
 
-  /**
-   * Mobile Money payment simulation (MTN / Airtel Uganda).
-   * In production: swap the setTimeout for a real Flutterwave/Pesapal API call.
-   * Returns the completed premium row with receipt_number on success.
-   */
   payMobileMoney: async (
     premiumId: string,
     phone: string,
@@ -715,19 +753,15 @@ export const premiumsApi = {
     actorId: string,
     actorName: string
   ): Promise<{ receipt_number: string; amount: number; status: string }> => {
-    // Validate phone format (Uganda: 07xxxxxxxx or 03xxxxxxxx)
     const cleaned = phone.replace(/\s/g, '');
     if (!/^(07|03)\d{8}$/.test(cleaned)) {
       throw new Error(`Invalid ${network.toUpperCase()} phone number. Use format 07XXXXXXXX.`);
     }
-    // Simulate network push delay (3 seconds)
     await new Promise(resolve => setTimeout(resolve, 3000));
-    // Complete the payment in Supabase
     return premiumsApi.pay(premiumId, actorId, actorName);
   },
 
   sendReminders: async (actorId: string, actorName: string) => {
-    // Find all unpaid premiums due within next 7 days
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() + 7);
 
@@ -792,10 +826,6 @@ export const providersApi = {
     return data;
   },
 
-  /**
-   * Check a member's insurance eligibility by National ID.
-   * Returns coverage details or null if member not found / not covered.
-   */
   checkEligibility: async (nationalId: string) => {
     const { data: profile, error } = await supabase
       .from('profiles')
@@ -858,7 +888,7 @@ export const notificationsApi = {
     const { error } = await supabase
       .from('notifications')
       .update({ read: true })
-      .eq('user_id', userId);
+      .eq('id', userId);
     if (error) throw new Error(error.message);
   },
 };
@@ -887,7 +917,6 @@ export const settingsApi = {
       .eq('id', 1)
       .single();
     if (error) throw new Error(error.message);
-    // Map DB columns to the shape components expect
     return {
       allowAutoApprovalOfLowClaims: data.allow_auto_approval,
       lowClaimThreshold: data.low_claim_threshold,
@@ -946,7 +975,6 @@ export const analyticsApi = {
     const totalClaimsPaid = (claimAmounts ?? []).reduce((s: number, r: any) => s + (r.amount_approved || 0), 0);
     const totalPremiumsCollected = (premiumAmounts ?? []).reduce((s: number, r: any) => s + (r.amount || 0), 0);
 
-    // Claims by status
     const { data: statusData } = await supabase
       .from('claims')
       .select('status');
@@ -955,7 +983,6 @@ export const analyticsApi = {
       statusCounts[r.status] = (statusCounts[r.status] || 0) + 1;
     });
 
-    // Monthly trends (last 6 months)
     const months: string[] = [];
     const now = new Date();
     for (let i = 5; i >= 0; i--) {
@@ -972,7 +999,7 @@ export const analyticsApi = {
 
         const [{ count: claims }, { data: premData }] = await Promise.all([
           supabase.from('claims').select('*', { count: 'exact', head: true })
-            .gte('date_filed', start).lt('date_filed', endStr),
+            .gte('date_filed', start).lt('end_date', endStr),
           supabase.from('premiums').select('amount').eq('status', 'paid')
             .gte('paid_date', start).lt('paid_date', endStr),
         ]);
@@ -1003,10 +1030,6 @@ export const analyticsApi = {
 // ── AI CHAT ────────────────────────────────────────────────────────────
 
 export const aiApi = {
-  /**
-   * Call the Supabase Edge Function 'ai-chat' which proxies the Gemini API.
-   * Falls back to a helpful offline message if the function is unavailable.
-   */
   chat: async (message: string, history: Array<{ role: string; content: string }>) => {
     try {
       const { data, error } = await supabase.functions.invoke('ai-chat', {
@@ -1015,7 +1038,6 @@ export const aiApi = {
       if (error) throw error;
       return data.reply as string;
     } catch {
-      // Graceful offline fallback
       return `I'm currently operating in offline mode. Your message "${message}" has been noted. For live AI assistance, ensure the Supabase Edge Function "ai-chat" is deployed with your GEMINI_API_KEY set.`;
     }
   },

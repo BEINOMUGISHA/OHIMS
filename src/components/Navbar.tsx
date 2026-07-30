@@ -23,7 +23,7 @@ import { User, Notification } from '../types';
 interface NavbarProps {
   currentUser: User | null;
   onLogout: () => void;
-  onUserSelected: (userTokenId: string) => void;
+  onUserSelected: (accountKey: string) => void;
   allUsers: User[];
   notifications: Notification[];
   onMarkNotificationRead: (id: string) => void;
@@ -51,6 +51,14 @@ export default function Navbar({
     onLogout();
     navigate('/login');
   };
+
+  // Pre-defined Sandbox Accounts (guarantees options are always visible)
+  const defaultSandboxAccounts = [
+    { key: 'admin', label: 'ADMIN: Administrator' },
+    { key: 'staff', label: 'STAFF: Operations Officer' },
+    { key: 'provider', label: 'CLINIC: Mulago Hospital' },
+    { key: 'member', label: 'MEMBER: Beinomugisha' },
+  ];
 
   return (
     <header className="bg-[#0A1628] text-white sticky top-0 z-40 shadow-md border-b border-gray-800">
@@ -81,7 +89,17 @@ export default function Navbar({
               <RefreshCw className="h-3.5 w-3.5 animate-spin-slow" /> Sandbox Swap:
             </span>
             <select
-              value={currentUser ? currentUser.id : 'guest'}
+              value={
+                currentUser
+                  ? currentUser.role === 'admin'
+                    ? 'admin'
+                    : currentUser.role === 'staff'
+                    ? 'staff'
+                    : currentUser.role === 'provider'
+                    ? 'provider'
+                    : 'member'
+                  : 'guest'
+              }
               onChange={(e) => {
                 if (e.target.value === 'guest') {
                   onLogout();
@@ -91,12 +109,12 @@ export default function Navbar({
                   navigate('/dashboard');
                 }
               }}
-              className="bg-transparent text-xs text-gray-200 outline-none border-none font-medium cursor-pointer max-w-[200px]"
+              className="bg-gray-900 text-xs text-gray-200 outline-none border-none font-medium cursor-pointer max-w-[210px]"
             >
               <option value="guest" className="bg-gray-950 text-gray-400">🌐 Public / Guest Mode</option>
-              {allUsers.map(u => (
-                <option key={u.id} value={u.id} className="bg-gray-950 text-white">
-                  {u.role.toUpperCase()}: {u.name.split(' ')[0]}
+              {defaultSandboxAccounts.map(acc => (
+                <option key={acc.key} value={acc.key} className="bg-gray-950 text-white">
+                  {acc.label}
                 </option>
               ))}
             </select>

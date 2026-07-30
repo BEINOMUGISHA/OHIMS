@@ -94,19 +94,21 @@ export default function App() {
     setLoading(false);
   };
 
-  // Handle sandbox user switcher
-  const handleUserSwap = async (userId: string) => {
+  // Handle sandbox user switcher with full authentications
+  const handleUserSwap = async (accountKey: string) => {
     setLoading(true);
     try {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-      if (profile) {
-        setCurrentUser(profile as unknown as User);
-        fetchNotifications(profile.id);
-      }
+      const demoMap: Record<string, { email: string; pass: string }> = {
+        admin: { email: 'admin@ohims.gov.ug', pass: 'admin123' },
+        staff: { email: 'staff@ohims.gov.ug', pass: 'staff123' },
+        provider: { email: 'mulago@ohims.gov.ug', pass: 'provider123' },
+        member: { email: 'beinomugishainnocent2001@gmail.com', pass: 'member123' },
+      };
+
+      const target = demoMap[accountKey] || { email: accountKey, pass: 'member123' };
+      const { user } = await authApi.login(target.email, target.pass);
+      setCurrentUser(user as unknown as User);
+      fetchNotifications(user.id);
     } catch (e) {
       console.error('User swap failed:', e);
     }

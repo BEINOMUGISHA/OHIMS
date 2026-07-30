@@ -52,16 +52,105 @@ export default function Navbar({
     navigate('/login');
   };
 
-  // Pre-defined Sandbox Accounts (guarantees options are always visible)
-  const defaultSandboxAccounts = [
-    { key: 'admin', label: 'ADMIN: Administrator' },
-    { key: 'staff', label: 'STAFF: Operations Officer' },
-    { key: 'provider', label: 'CLINIC: Mulago Hospital' },
-    { key: 'member', label: 'MEMBER: Beinomugisha' },
-  ];
+  const currentRoleKey = currentUser
+    ? currentUser.role === 'admin'
+      ? 'admin'
+      : currentUser.role === 'staff'
+      ? 'staff'
+      : currentUser.role === 'provider'
+      ? 'provider'
+      : 'member'
+    : 'guest';
 
   return (
     <header className="bg-[#0A1628] text-white sticky top-0 z-40 shadow-md border-b border-gray-800">
+      {/* Top Banner for Instant Sandbox Role Swap (Always Visible on Mobile & Desktop) */}
+      <div className="bg-slate-950 border-b border-slate-800/80 px-4 py-1.5 text-xs">
+        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 text-amber-400 font-bold font-mono">
+            <RefreshCw className="h-3.5 w-3.5 animate-spin-slow" />
+            <span>Sandbox Role Quick Switch:</span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px]">
+            <button
+              type="button"
+              onClick={() => {
+                onLogout();
+                navigate('/');
+              }}
+              className={`px-2.5 py-1 rounded-md transition-all font-semibold cursor-pointer ${
+                currentRoleKey === 'guest'
+                  ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
+                  : 'bg-slate-900 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-800'
+              }`}
+            >
+              🌐 Guest / Public
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                onUserSelected('member');
+                navigate('/dashboard');
+              }}
+              className={`px-2.5 py-1 rounded-md transition-all font-semibold cursor-pointer ${
+                currentRoleKey === 'member'
+                  ? 'bg-teal-500 text-slate-950 font-bold shadow-sm'
+                  : 'bg-slate-900 text-teal-400 hover:bg-teal-950/40 border border-slate-800'
+              }`}
+            >
+              👤 Member (Beinomugisha)
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                onUserSelected('admin');
+                navigate('/dashboard');
+              }}
+              className={`px-2.5 py-1 rounded-md transition-all font-semibold cursor-pointer ${
+                currentRoleKey === 'admin'
+                  ? 'bg-purple-500 text-white font-bold shadow-sm'
+                  : 'bg-slate-900 text-purple-400 hover:bg-purple-950/40 border border-slate-800'
+              }`}
+            >
+              👑 Admin
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                onUserSelected('staff');
+                navigate('/dashboard');
+              }}
+              className={`px-2.5 py-1 rounded-md transition-all font-semibold cursor-pointer ${
+                currentRoleKey === 'staff'
+                  ? 'bg-blue-500 text-white font-bold shadow-sm'
+                  : 'bg-slate-900 text-blue-400 hover:bg-blue-950/40 border border-slate-800'
+              }`}
+            >
+              💼 Staff
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                onUserSelected('provider');
+                navigate('/dashboard');
+              }}
+              className={`px-2.5 py-1 rounded-md transition-all font-semibold cursor-pointer ${
+                currentRoleKey === 'provider'
+                  ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
+                  : 'bg-slate-900 text-emerald-400 hover:bg-emerald-950/40 border border-slate-800'
+              }`}
+            >
+              🏥 Clinic (Mulago)
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           
@@ -82,43 +171,6 @@ export default function Navbar({
               </span>
             </div>
           </Link>
-
-          {/* Sandbox Role Quick Changer */}
-          <div className="hidden md:flex items-center bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 space-x-2">
-            <span className="text-xs text-amber-500 font-bold flex items-center gap-1">
-              <RefreshCw className="h-3.5 w-3.5 animate-spin-slow" /> Sandbox Swap:
-            </span>
-            <select
-              value={
-                currentUser
-                  ? currentUser.role === 'admin'
-                    ? 'admin'
-                    : currentUser.role === 'staff'
-                    ? 'staff'
-                    : currentUser.role === 'provider'
-                    ? 'provider'
-                    : 'member'
-                  : 'guest'
-              }
-              onChange={(e) => {
-                if (e.target.value === 'guest') {
-                  onLogout();
-                  navigate('/login');
-                } else {
-                  onUserSelected(e.target.value);
-                  navigate('/dashboard');
-                }
-              }}
-              className="bg-gray-900 text-xs text-gray-200 outline-none border-none font-medium cursor-pointer max-w-[210px]"
-            >
-              <option value="guest" className="bg-gray-950 text-gray-400">🌐 Public / Guest Mode</option>
-              {defaultSandboxAccounts.map(acc => (
-                <option key={acc.key} value={acc.key} className="bg-gray-950 text-white">
-                  {acc.label}
-                </option>
-              ))}
-            </select>
-          </div>
 
           {/* Main User Actions & Notification Panel Component */}
           <div className="flex items-center space-x-3 sm:space-x-4">

@@ -17,13 +17,24 @@ jobs:
       - name: Checkout 🛎️
         uses: actions/checkout@v4
 
-      - name: Install and Build 🔧
-        run: |
-          npm ci
-          npm run build
+      - name: Setup Node.js ⚙️
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies 📦
+        run: npm ci
+
+      - name: Build 🔧
+        env:
+          VITE_SUPABASE_URL: https://kdvtawddhskanutixkeu.supabase.co
+          VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtkdnRhd2RkaHNrYW51dGl4a2V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NDYzMjksImV4cCI6MjEwMDEyMjMyOX0.YWvgGCWhxuj3mET7axErsnaiB-RSfdawD0FVr86A4z0
+        run: npm run build
 
       - name: Deploy 🚀
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: dist # The folder Vite builds into
-          branch: gh-pages # The branch the action deploys to
+          folder: dist
+          branch: gh-pages
+          clean: true

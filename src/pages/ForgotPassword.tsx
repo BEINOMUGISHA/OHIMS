@@ -28,8 +28,9 @@ export default function ForgotPassword() {
 
     setLoading(true);
     try {
-      const data = await authApi.resetPassword(email, newPassword);
-      setSuccess(data.message || 'Password successfully updated! Redirecting to sign in...');
+      const { data, error } = await authApi.resetPassword(email, newPassword);
+      if (error) throw new Error(error);
+      setSuccess((data as any)?.message || 'Password successfully updated! Redirecting to sign in...');
       setTimeout(() => {
         navigate('/login', { replace: true });
       }, 2000);

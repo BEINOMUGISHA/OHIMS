@@ -2,8 +2,10 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * OHIMS Uganda — App Root with Page-Based Routing
+ * OHIMS Uganda — App Root with Page-Based Routing (v2)
  * Configured with HashRouter for zero-config GitHub Pages sub-route support.
+ * Wraps entire app in ToastProvider for global notifications.
+ * Session watcher is integrated via useSession (inside Router context).
  */
 
 import React, { useState, useEffect } from 'react';
@@ -15,6 +17,9 @@ import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import DashboardPage from './pages/DashboardPage';
 import ProtectedRoute from './components/ProtectedRoute';
+import ToastContainer from './components/ui/Toast';
+import { ToastProvider, useToast } from './hooks/useToast';
+import { useSession, flagIntentionalLogout } from './hooks/useSession';
 import { User, Notification, InsurancePlan } from './types';
 import { RefreshCw, ShieldCheck } from 'lucide-react';
 import { supabase } from './lib/supabase';
@@ -25,7 +30,9 @@ import {
   authApi,
 } from './lib/api';
 
-export default function App() {
+// ── Session-aware inner app (must be inside <Router>) ──────────────────
+
+function AppInner() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [plans, setPlans] = useState<InsurancePlan[]>([]);
@@ -35,6 +42,16 @@ export default function App() {
     const saved = localStorage.getItem('ohims_theme');
     if (saved === 'dark') return 'dark';
     return 'light';
+  });
+
+  const { showToast } = useToast();
+
+  // Integrate session expiry watcher
+  useSession({
+    onExpired: () => {
+      setCurrentUser(null);
+      setNotifications([]);
+    },
   });
 
   useEffect(() => {
@@ -47,18 +64,18 @@ export default function App() {
   }, [theme]);
 
   const handleToggleTheme = () => {
-    setTheme(prev => prev === 'light' ? 'dark' : 'light');
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
   };
 
   // Load general platform lookup values
   const loadPlatformData = async () => {
     try {
-      const [plansData, usersData] = await Promise.all([
+      const [plansResult, usersResult] = await Promise.all([
         plansApi.list(),
         usersApi.list(),
       ]);
-      setPlans(plansData as unknown as InsurancePlan[]);
-      setAllUsers(usersData as unknown as User[]);
+      if (plansResult.data) setPlans(plansResult.data as unknown as InsurancePlan[]);
+      if (usersResult.data) setAllUsers(usersResult.data as unknown as User[]);
     } catch (e) {
       console.error('Error fetching baseline platform data:', e);
     }
@@ -66,78 +83,77 @@ export default function App() {
 
   // Fetch notifications for the current user
   const fetchNotifications = async (userId: string) => {
-    try {
-      const data = await notificationsApi.list(userId);
-      setNotifications(data as unknown as Notification[]);
-    } catch (e) {
-      console.error('Failed to sync in-app notifications:', e);
-    }
+    const result = await notificationsApi.list(userId);
+    if (result.data) setNotifications(result.data as unknown as Notification[]);
   };
 
   // Restore session from Supabase Auth session
   const restoreSession = async () => {
-    try {
-      const profile = await authApi.getMe();
-      if (profile) {
-        setCurrentUser(profile as unknown as User);
-        fetchNotifications(profile.id);
-      }
-    } catch (e) {
-      console.error('Failed to restore session:', e);
+    const result = await authApi.getMe();
+    if (result.data) {
+      setCurrentUser(result.data as unknown as User);
+      fetchNotifications((result.data as any).id);
     }
   };
 
   // Called after login/register success
-  const handleLoginSuccess = async (userId: string) => {
+  const handleLoginSuccess = async (_userId: string) => {
     setLoading(true);
     await restoreSession();
     setLoading(false);
   };
 
-  // Handle sandbox user switcher with full authentications
+  // Handle sandbox user switcher — only available in DEMO_MODE
   const handleUserSwap = async (accountKey: string) => {
+    // Gate demo credentials behind VITE_DEMO_MODE env flag
+    if ((import.meta as any).env?.VITE_DEMO_MODE !== 'true') {
+      showToast('Demo mode is disabled in this environment.', 'warning');
+      return;
+    }
+
     setLoading(true);
     try {
       const demoMap: Record<string, { email: string; pass: string }> = {
-        admin: { email: 'admin@ohims.gov.ug', pass: 'admin123' },
-        staff: { email: 'staff@ohims.gov.ug', pass: 'staff123' },
-        provider: { email: 'mulago@ohims.gov.ug', pass: 'provider123' },
-        member: { email: 'beinomugishainnocent2001@gmail.com', pass: 'member123' },
+        admin:    { email: 'admin@ohims.gov.ug',               pass: 'admin123' },
+        staff:    { email: 'staff@ohims.gov.ug',               pass: 'staff123' },
+        provider: { email: 'mulago@ohims.gov.ug',              pass: 'provider123' },
+        member:   { email: 'beinomugishainnocent2001@gmail.com', pass: 'member123' },
       };
 
       const target = demoMap[accountKey] || { email: accountKey, pass: 'member123' };
-      const { user } = await authApi.login(target.email, target.pass);
-      setCurrentUser(user as unknown as User);
-      fetchNotifications(user.id);
+      const result = await authApi.login(target.email, target.pass);
+      if (result.error) {
+        showToast(result.error, 'error');
+      } else if (result.data) {
+        setCurrentUser((result.data as any).user as unknown as User);
+        fetchNotifications((result.data as any).user.id);
+      }
     } catch (e) {
-      console.error('User swap failed:', e);
+      showToast('User swap failed. Please try again.', 'error');
     }
     setLoading(false);
   };
 
   // Mark single notification as read
   const handleMarkNotificationRead = async (id: string) => {
-    try {
-      await notificationsApi.markRead(id);
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-    } catch (e) {
-      console.error('Failed to dismiss notification:', e);
+    const result = await notificationsApi.markRead(id);
+    if (!result.error) {
+      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
     }
   };
 
   // Clear all notifications
   const handleClearAllNotifications = async () => {
     if (!currentUser) return;
-    try {
-      await notificationsApi.clearAll(currentUser.id);
-      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-    } catch (e) {
-      console.error('Failed to empty notification drawer:', e);
+    const result = await notificationsApi.clearAll(currentUser.id);
+    if (!result.error) {
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
     }
   };
 
-  // Logout
+  // Logout — flag intentional so session watcher doesn't show expiry toast
   const handleLogout = async () => {
+    flagIntentionalLogout();
     await authApi.logout();
     setCurrentUser(null);
     setNotifications([]);
@@ -175,7 +191,7 @@ export default function App() {
     );
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Realtime notification subscription
   useEffect(() => {
@@ -192,12 +208,17 @@ export default function App() {
           table: 'notifications',
           filter: `user_id=eq.${currentUser.id}`,
         },
-        () => fetchNotifications(currentUser.id)
+        (payload) => {
+          // Push new notification into state + show toast
+          const n = payload.new as Notification;
+          setNotifications((prev) => [n, ...prev.slice(0, 49)]);
+          showToast(n.message, n.type === 'alert' ? 'warning' : n.type as any);
+        }
       )
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [currentUser?.id]);
+  }, [currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
     return (
@@ -220,57 +241,70 @@ export default function App() {
   }
 
   return (
-    <Router>
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col font-sans selection:bg-[#0D9488]/20 selection:text-[#0D9488] transition-colors duration-200">
-        <Navbar
-          currentUser={currentUser}
-          onLogout={handleLogout}
-          onUserSelected={handleUserSwap}
-          allUsers={allUsers}
-          notifications={notifications}
-          onMarkNotificationRead={handleMarkNotificationRead}
-          onClearAllNotifications={handleClearAllNotifications}
-          theme={theme}
-          onToggleTheme={handleToggleTheme}
-        />
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col font-sans selection:bg-[#0D9488]/20 selection:text-[#0D9488] transition-colors duration-200">
+      <Navbar
+        currentUser={currentUser}
+        onLogout={handleLogout}
+        onUserSelected={handleUserSwap}
+        allUsers={allUsers}
+        notifications={notifications}
+        onMarkNotificationRead={handleMarkNotificationRead}
+        onClearAllNotifications={handleClearAllNotifications}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
+      />
 
-        <main className="flex-1 pb-16">
-          <Routes>
-            <Route path="/" element={<LandingPage plans={plans} />} />
-            
-            <Route
-              path="/login"
-              element={
-                currentUser ? <Navigate to="/dashboard" replace /> : <Login onLoginSuccess={handleLoginSuccess} />
-              }
-            />
+      <main className="flex-1 pb-16">
+        <Routes>
+          <Route path="/" element={<LandingPage plans={plans} />} />
 
-            <Route
-              path="/register"
-              element={
-                currentUser ? <Navigate to="/dashboard" replace /> : <Register plans={plans} onLoginSuccess={handleLoginSuccess} />
-              }
-            />
+          <Route
+            path="/login"
+            element={
+              currentUser ? <Navigate to="/dashboard" replace /> : <Login onLoginSuccess={handleLoginSuccess} />
+            }
+          />
 
-            <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route
+            path="/register"
+            element={
+              currentUser ? <Navigate to="/dashboard" replace /> : <Register plans={plans} onLoginSuccess={handleLoginSuccess} />
+            }
+          />
 
-            <Route
-              path="/dashboard"
-              element={
-                <ProtectedRoute currentUser={currentUser}>
-                  <DashboardPage
-                    currentUser={currentUser!}
-                    onRefreshData={handleRefreshAllData}
-                  />
-                </ProtectedRoute>
-              }
-            />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
 
-            {/* Fallback route */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </main>
-      </div>
-    </Router>
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute currentUser={currentUser}>
+                <DashboardPage
+                  currentUser={currentUser!}
+                  onRefreshData={handleRefreshAllData}
+                />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Fallback route */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </main>
+
+      {/* Global toast overlay */}
+      <ToastContainer />
+    </div>
+  );
+}
+
+// ── Root export — wraps in providers ──────────────────────────────────
+
+export default function App() {
+  return (
+    <ToastProvider>
+      <Router>
+        <AppInner />
+      </Router>
+    </ToastProvider>
   );
 }

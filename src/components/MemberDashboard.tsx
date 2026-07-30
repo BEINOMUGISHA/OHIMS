@@ -45,13 +45,19 @@ import {
 import { User, Member, Policy, Beneficiary, Premium, Claim, InsurancePlan, Provider } from '../types';
 import MedicalHologramDashboard from './MedicalHologramDashboard';
 import { membersApi, claimsApi, premiumsApi, policiesApi, providersApi, aiApi } from '../lib/api';
+import ErrorBoundary from './ui/ErrorBoundary';
+import LoadingSkeleton from './ui/LoadingSkeleton';
+import EmptyState from './ui/EmptyState';
+import StatusBadge from './ui/StatusBadge';
+import { useToast } from '../hooks/useToast';
 
 interface MemberDashboardProps {
   currentUser: User;
   onRefreshData: () => void;
 }
 
-export default function MemberDashboard({ currentUser, onRefreshData }: MemberDashboardProps) {
+function MemberDashboardInner({ currentUser, onRefreshData }: MemberDashboardProps) {
+  const { showToast } = useToast();
   const [memberData, setMemberData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'claims' | 'premiums' | 'beneficiaries' | 'providers' | 'checker' | 'estimator' | 'ai_chat' | 'settings' | 'hologram'>('overview');
@@ -148,28 +154,30 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
     try {
       setLoading(true);
       // Fetch full member profile with nested policies, premiums, beneficiaries
-      const details = await membersApi.get(currentUser.id);
+      const { data: details, error } = await membersApi.get(currentUser.id);
+      if (error || !details) { console.error('fetchProfile error:', error); setLoading(false); return; }
       setMemberData(details);
 
       // Prepopulate settings form
-      if (details) {
-        setSettingsAddress((details as any).address || '');
-        setSettingsPhone((details as any).phone || currentUser.phone || '');
-        setSettingsDob((details as any).dob || '');
-        setSettingsGender((details as any).gender || 'male');
-        setSettingsNationalId((details as any).national_id || '');
-        setSettingsPhoto((details as any).avatar_url || '');
+      const d = details as any;
+      if (d) {
+        setSettingsAddress(d.address || '');
+        setSettingsPhone(d.phone || currentUser.phone || '');
+        setSettingsDob(d.dob || '');
+        setSettingsGender(d.gender || 'male');
+        setSettingsNationalId(d.national_id || '');
+        setSettingsPhoto(d.avatar_url || '');
       }
 
       // Prepopulate claim policy id if policy exists
-      const policies = (details as any)?.policies;
+      const policies = d?.policies;
       if (policies && policies.length > 0) {
         setClaimPlanId(policies[0].id);
       }
 
       // Fetch providers for Clinic Finder
-      const provData = await providersApi.list();
-      setProviders(provData as unknown as Provider[]);
+      const { data: provData } = await providersApi.list();
+      setProviders((provData as unknown as Provider[]) ?? []);
     } catch (e) {
       console.error('Error fetching member stats', e);
     } finally {
@@ -285,14 +293,15 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
     setPaymentStep('prompting');
 
     try {
-      const res = await premiumsApi.payMobileMoney(
+      const { data: res, error: payErr } = await premiumsApi.payMobileMoney(
         payingPremium.id,
         mmPhone,
         mmNetwork,
         currentUser.id,
         currentUser.name
       );
-      setLastReceipt(res.receipt_number);
+      if (payErr) throw new Error(payErr);
+      setLastReceipt((res as any)?.receipt_number ?? null);
       setPaymentStep('success');
       onRefreshData();
       fetchProfile();
@@ -310,8 +319,8 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
     setShowDocsModal(true);
     setLoadingDocs(true);
     try {
-      const docs = await claimsApi.getDocuments(claimId);
-      setViewingClaimDocs(docs);
+      const { data: docs } = await claimsApi.getDocuments(claimId);
+      setViewingClaimDocs((docs as any[]) ?? []);
     } catch (e) {
       console.error(e);
       setViewingClaimDocs([]);
@@ -360,7 +369,7 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
     }
 
     try {
-      const createdClaim = await claimsApi.submit({
+      const { data: createdClaim, error: claimErr } = await claimsApi.submit({
         policy_id: claimPlanId,
         diagnosis: claimDiagnosis,
         treatment: claimTreatment,
@@ -369,10 +378,13 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
         actorName: currentUser.name,
       });
 
-      if (claimFile && createdClaim?.id) {
+      if (claimErr) throw new Error(claimErr);
+
+      const claimId = (createdClaim as any)?.id;
+      if (claimFile && claimId) {
         setClaimFileUploading(true);
         try {
-          await claimsApi.uploadDocument(createdClaim.id, claimFile, currentUser.id);
+          await claimsApi.uploadDocument(claimId, claimFile, currentUser.id);
         } catch (fileErr) {
           console.warn('Document upload warning:', fileErr);
         } finally {
@@ -476,11 +488,11 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
     setAiLoading(true);
 
     try {
-      const reply = await aiApi.chat(
+      const { data: reply, error: aiErr } = await aiApi.chat(
         userMsg,
         aiMessages.slice(1).map(m => ({ role: m.role, content: m.content }))
       );
-      setAiMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+      setAiMessages(prev => [...prev, { role: 'assistant', content: (aiErr ? 'Connection failed: ' + aiErr : (reply as string) ?? 'No response.') }]);
     } catch (err: any) {
       setAiMessages(prev => [...prev, { role: 'assistant', content: 'Connection failed: ' + err.message }]);
     } finally {
@@ -3247,5 +3259,13 @@ export default function MemberDashboard({ currentUser, onRefreshData }: MemberDa
       )}
 
     </div>
+  );
+}
+
+export default function MemberDashboard(props: MemberDashboardProps) {
+  return (
+    <ErrorBoundary section="Member Dashboard">
+      <MemberDashboardInner {...props} />
+    </ErrorBoundary>
   );
 }

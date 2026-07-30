@@ -49,7 +49,7 @@ export default function Register({ plans, onLoginSuccess }: RegisterPageProps) {
 
     setLoading(true);
     try {
-      const data = await authApi.register({
+      const { data, error: regError } = await authApi.register({
         name,
         email,
         password,
@@ -62,27 +62,31 @@ export default function Register({ plans, onLoginSuccess }: RegisterPageProps) {
         premium_frequency: freq,
       });
 
-      if (data.emailConfirmationRequired) {
-        setSuccess(data.message || 'Registration successful! If required, please check your inbox to confirm your account.');
+      if (regError) throw new Error(regError);
+
+      const regData = data as any;
+      if (regData?.emailConfirmationRequired) {
+        setSuccess(regData.message || 'Registration successful! If required, please check your inbox to confirm your account.');
         return;
       }
 
       setSuccess('Account created successfully! Forwarding to Member Dashboard...');
-      await onLoginSuccess(data.user.id);
+      await onLoginSuccess(regData?.user?.id ?? regData?.id);
       setTimeout(() => {
         navigate('/dashboard', { replace: true });
       }, 1200);
     } catch (err: any) {
       // Self-heal: If account exists or network hiccup occurs, attempt direct login
       try {
-        const loginRes = await authApi.login(email, password);
+        const { data: loginData, error: loginError } = await authApi.login(email, password);
+        if (loginError) throw new Error(loginError);
         setSuccess('Account verified! Forwarding to Member Dashboard...');
-        await onLoginSuccess(loginRes.user.id);
+        await onLoginSuccess((loginData as any)?.user?.id ?? (loginData as any)?.token);
         setTimeout(() => {
           navigate('/dashboard', { replace: true });
         }, 1000);
         return;
-      } catch (loginErr) {
+      } catch (_loginErr) {
         let msg = err?.message || 'Registration failed. Please check your internet connection.';
         if (typeof msg === 'string' && (msg.includes('already registered') || msg.includes('already exists'))) {
           msg = 'An account with this email is already registered. Please click Sign In below.';

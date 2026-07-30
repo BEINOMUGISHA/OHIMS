@@ -26,8 +26,9 @@ export default function Login({ onLoginSuccess }: LoginPageProps) {
     setLoading(true);
 
     try {
-      const data = await authApi.login(email, password);
-      await onLoginSuccess(data.token);
+      const { data, error } = await authApi.login(email, password);
+      if (error || !data) throw new Error(error ?? 'Authentication failed.');
+      await onLoginSuccess((data as any).token ?? (data as any).user?.id);
       navigate('/dashboard', { replace: true });
     } catch (err: any) {
       let msg = err?.message || 'Authentication failed. Please check credentials and try again.';

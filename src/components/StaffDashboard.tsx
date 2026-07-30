@@ -1,6 +1,9 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * StaffDashboard v2 — hardened with ErrorBoundary, tri-state loading/empty/error,
+ * useToast notifications, optimistic claim updates, StatusBadge, and { data, error } API responses.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -8,33 +11,33 @@ import {
   Shield,
   FileCheck,
   AlertTriangle,
-  Activity,
   DollarSign,
-  Briefcase,
   Users,
-  Settings,
   RefreshCw,
   Bell,
-  Scale,
   X,
-  FileText,
-  Calendar,
   Clock,
   Download,
   Search
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
-import { User, Claim, Policy, Premium } from '../types';
+import { User, Claim } from '../types';
 import {
   claimsApi, policiesApi, premiumsApi, providersApi, plansApi, settingsApi, auditApi, usersApi
 } from '../lib/api';
+import ErrorBoundary from './ui/ErrorBoundary';
+import LoadingSkeleton from './ui/LoadingSkeleton';
+import EmptyState from './ui/EmptyState';
+import StatusBadge from './ui/StatusBadge';
+import { useToast } from '../hooks/useToast';
 
 interface StaffDashboardProps {
   currentUser: User;
   onRefreshData: () => void;
 }
 
-export default function StaffDashboard({ currentUser, onRefreshData }: StaffDashboardProps) {
+function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps) {
+  const { showToast } = useToast();
   const [claims, setClaims] = useState<Claim[]>([]);
   const [policies, setPolicies] = useState<any[]>([]);
   const [premiums, setPremiums] = useState<any[]>([]);
@@ -89,81 +92,94 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
   const [reviewNotes, setReviewNotes] = useState('');
   const [reviewError, setReviewError] = useState('');
 
+  // Global load error state
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const fetchStaffData = async () => {
-    try {
-      setLoading(true);
+    setLoading(true);
+    setLoadError(null);
 
-      const [claimsData, polData, premData, provData, plansData, settingsData, logsData, membersData] =
-        await Promise.all([
-          claimsApi.list(),
-          policiesApi.list(),
-          premiumsApi.list(),
-          providersApi.list(),
-          plansApi.list(),
-          settingsApi.get(),
-          auditApi.list(),
-          usersApi.listMembers(),
-        ]);
+    const results = await Promise.allSettled([
+      claimsApi.list(),
+      policiesApi.list(),
+      premiumsApi.list(),
+      providersApi.list(),
+      plansApi.list(),
+      settingsApi.get(),
+      auditApi.list(),
+      usersApi.listMembers(),
+    ]);
 
-      setClaims(claimsData as unknown as Claim[]);
-      setPolicies(polData);
-      setPremiums(premData);
-      setProviders(provData);
-      setPlans(plansData);
-      setAuditLogs(logsData);
-      setMembersList(membersData);
+    const [claimsRes, polRes, premRes, provRes, plansRes, settingsRes, logsRes, membersRes] = results;
 
-      setSettingsAllowAuto(settingsData.allowAutoApprovalOfLowClaims);
-      setSettingsThreshold(settingsData.lowClaimThreshold.toString());
-      setSettingsSlaDays(settingsData.autoSlaDays.toString());
-      setSettingsRequireAccreditation(settingsData.requireProviderAccreditation);
-      setSettingsAllowSelfSubmit(settingsData.allowSelfClaimSubmission);
-    } catch (e) {
-      console.error('Error loading adjuster logs', e);
-    } finally {
+    // At least one critical dataset must succeed
+    const criticalError = claimsRes.status === 'rejected' && polRes.status === 'rejected';
+    if (criticalError) {
+      setLoadError('Failed to load dashboard data. Please check your connection and retry.');
       setLoading(false);
+      return;
     }
+
+    if (claimsRes.status === 'fulfilled' && !claimsRes.value.error)
+      setClaims((claimsRes.value.data as unknown as Claim[]) ?? []);
+    if (polRes.status === 'fulfilled' && !polRes.value.error)
+      setPolicies((polRes.value.data as any[]) ?? []);
+    if (premRes.status === 'fulfilled' && !premRes.value.error)
+      setPremiums((premRes.value.data as any[]) ?? []);
+    if (provRes.status === 'fulfilled' && !provRes.value.error)
+      setProviders((provRes.value.data as any[]) ?? []);
+    if (plansRes.status === 'fulfilled' && !plansRes.value.error)
+      setPlans((plansRes.value.data as any[]) ?? []);
+    if (logsRes.status === 'fulfilled' && !logsRes.value.error)
+      setAuditLogs((logsRes.value.data as any[]) ?? []);
+    if (membersRes.status === 'fulfilled' && !membersRes.value.error)
+      setMembersList((membersRes.value.data as any[]) ?? []);
+
+    if (settingsRes.status === 'fulfilled' && settingsRes.value.data) {
+      const s = settingsRes.value.data;
+      setSettingsAllowAuto(s.allowAutoApprovalOfLowClaims);
+      setSettingsThreshold(s.lowClaimThreshold.toString());
+      setSettingsSlaDays(s.autoSlaDays.toString());
+      setSettingsRequireAccreditation(s.requireProviderAccreditation);
+      setSettingsAllowSelfSubmit(s.allowSelfClaimSubmission);
+    }
+
+    setLoading(false);
   };
 
   const handleSuspendMember = async (userId: string) => {
     if (!window.confirm('Are you sure you want to suspend this member and their active policies?')) return;
     setMemberActionLoading(true);
-    try {
-      await usersApi.suspend(userId, currentUser.id, currentUser.name);
-      setMemberActionMsg('Member and active policy suspended successfully.');
-      const updated = await usersApi.listMembers(memberSearch);
-      setMembersList(updated);
+    const { error } = await usersApi.suspend(userId, currentUser.id, currentUser.name);
+    if (error) {
+      showToast(`Failed to suspend member: ${error}`, 'error');
+    } else {
+      showToast('Member and active policy suspended successfully.', 'success');
+      const { data: updated } = await usersApi.listMembers(memberSearch);
+      if (updated) setMembersList(updated as any[]);
       onRefreshData();
-    } catch (e: any) {
-      alert('Failed to suspend member: ' + e.message);
-    } finally {
-      setMemberActionLoading(false);
     }
+    setMemberActionLoading(false);
   };
 
   const handleReinstateMember = async (userId: string) => {
     setMemberActionLoading(true);
-    try {
-      await usersApi.reinstate(userId, currentUser.id, currentUser.name);
-      setMemberActionMsg('Member and active policy reinstated successfully.');
-      const updated = await usersApi.listMembers(memberSearch);
-      setMembersList(updated);
+    const { error } = await usersApi.reinstate(userId, currentUser.id, currentUser.name);
+    if (error) {
+      showToast(`Failed to reinstate member: ${error}`, 'error');
+    } else {
+      showToast('Member and active policy reinstated successfully.', 'success');
+      const { data: updated } = await usersApi.listMembers(memberSearch);
+      if (updated) setMembersList(updated as any[]);
       onRefreshData();
-    } catch (e: any) {
-      alert('Failed to reinstate member: ' + e.message);
-    } finally {
-      setMemberActionLoading(false);
     }
+    setMemberActionLoading(false);
   };
 
   const handleSearchMembers = async (query: string) => {
     setMemberSearch(query);
-    try {
-      const results = await usersApi.listMembers(query);
-      setMembersList(results);
-    } catch (e) {
-      console.error(e);
-    }
+    const { data: results } = await usersApi.listMembers(query);
+    if (results) setMembersList(results as any[]);
   };
 
   const getClaimSlaInfo = (c: any) => {
@@ -185,7 +201,7 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
     fetchStaffData();
   }, [currentUser]);
 
-  // Handle adjudication decision
+  // Handle adjudication decision with optimistic update
   const handleAdjudicate = async (status: 'approved' | 'rejected') => {
     if (!selectedClaim) return;
     setReviewError('');
@@ -196,132 +212,134 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
       return;
     }
 
-    try {
-      await claimsApi.review(
-        selectedClaim.id,
-        { status, amount_approved: amt, notes: reviewNotes },
-        currentUser.id,
-        currentUser.name
+    // Optimistic update — immediately reflect the new status in the list
+    const previousClaims = claims;
+    setClaims((prev) =>
+      prev.map((c: any) =>
+        c.id === selectedClaim.id ? { ...c, status, amount_approved: amt } : c
+      )
+    );
+    setSelectedClaim(null);
+    setApprovedAmount('');
+    setReviewNotes('');
+
+    const { error } = await claimsApi.review(
+      selectedClaim.id,
+      { status, amount_approved: amt, notes: reviewNotes },
+      currentUser.id,
+      currentUser.name
+    );
+
+    if (error) {
+      // Reconcile: revert optimistic update
+      setClaims(previousClaims);
+      setReviewError(`Failed to save assessment: ${error}`);
+      setSelectedClaim(selectedClaim);
+    } else {
+      showToast(
+        status === 'approved'
+          ? `Claim approved for UGX ${amt.toLocaleString()}.`
+          : 'Claim denied. The member will be notified.',
+        status === 'approved' ? 'success' : 'warning'
       );
-      setSelectedClaim(null);
-      setApprovedAmount('');
-      setReviewNotes('');
       onRefreshData();
-      fetchStaffData();
-    } catch (err: any) {
-      setReviewError('Failed to save assessment: ' + err.message);
     }
   };
 
-  // Dispatch Direct Payout
+  // Dispatch Direct Payout with optimistic update
   const handleDisbursePayout = async (claimId: string) => {
-    try {
-      await claimsApi.pay(claimId, currentUser.id, currentUser.name);
+    const previousClaims = claims;
+    setClaims((prev) =>
+      prev.map((c: any) => c.id === claimId ? { ...c, status: 'paid' } : c)
+    );
+    const { error } = await claimsApi.pay(claimId, currentUser.id, currentUser.name);
+    if (error) {
+      setClaims(previousClaims);
+      showToast(`Payout failed: ${error}`, 'error');
+    } else {
+      showToast('Payment disbursed successfully!', 'success');
       onRefreshData();
-      fetchStaffData();
-    } catch (err) {
-      console.error(err);
     }
   };
 
   // Update Policy status
   const handleTogglePolicyStatus = async (policyId: string, currentStatus: string) => {
     const nextStatus = currentStatus === 'active' ? 'suspended' : 'active';
-    try {
-      await policiesApi.updateStatus(policyId, nextStatus, currentUser.id, currentUser.name);
-      onRefreshData();
-      fetchStaffData();
-    } catch (err) { console.error(err); }
+    const { error } = await policiesApi.updateStatus(policyId, nextStatus, currentUser.id, currentUser.name);
+    if (error) showToast(`Policy update failed: ${error}`, 'error');
+    else { showToast(`Policy ${nextStatus}.`, 'success'); onRefreshData(); fetchStaffData(); }
   };
 
   // Terminate policy
   const handleTerminatePolicy = async (policyId: string) => {
     if (!window.confirm('Are you absolutely sure you want to TERMINATE this user policy? This completely revokes healthcare diagnostic coverage.')) return;
-    try {
-      await policiesApi.updateStatus(policyId, 'cancelled', currentUser.id, currentUser.name);
-      onRefreshData();
-      fetchStaffData();
-    } catch (err) { console.error(err); }
+    const { error } = await policiesApi.updateStatus(policyId, 'cancelled', currentUser.id, currentUser.name);
+    if (error) showToast(`Termination failed: ${error}`, 'error');
+    else { showToast('Policy terminated.', 'warning'); onRefreshData(); fetchStaffData(); }
   };
 
   // Trigger Bulk Premium Reminders
   const handleBroadcastReminders = async () => {
-    try {
-      const d = await premiumsApi.sendReminders(currentUser.id, currentUser.name);
-      alert(`SLA automation successful! Dispatched ${d.reminders_sent} notification reminders.`);
-      onRefreshData();
-      fetchStaffData();
-    } catch (err) { console.error(err); }
+    const { data, error } = await premiumsApi.sendReminders(currentUser.id, currentUser.name);
+    if (error) { showToast(`Reminder broadcast failed: ${error}`, 'error'); return; }
+    const failed = data?.per_item?.filter((r: any) => !r.success).length ?? 0;
+    const sent = data?.reminders_sent ?? 0;
+    showToast(
+      failed > 0
+        ? `${sent} reminders sent. ${failed} failed — check audit logs.`
+        : `${sent} reminder notifications dispatched successfully.`,
+      failed > 0 ? 'warning' : 'success'
+    );
+    onRefreshData();
   };
 
   // Toggle Provider Accreditation
   const handleToggleProviderAccreditation = async (id: string, status: 'accredited' | 'suspended') => {
-    try {
-      await providersApi.update(id, { accreditation_status: status }, currentUser.id, currentUser.name);
-      fetchStaffData();
-      onRefreshData();
-    } catch (err: any) {
-      alert('Failed to update accreditation: ' + err.message);
-    }
+    const { error } = await providersApi.update(id, { accreditation_status: status }, currentUser.id, currentUser.name);
+    if (error) showToast(`Accreditation update failed: ${error}`, 'error');
+    else { showToast(`Provider ${status}.`, 'success'); fetchStaffData(); onRefreshData(); }
   };
 
   // Add a Clinic Provider Partner
   const handleCreateProvider = async (e: React.FormEvent) => {
     e.preventDefault();
     setProviderError('');
-    setProviderSuccess('');
     if (!providerName || !providerLocation || !providerContact) {
       setProviderError('Please fill out Name, Location, and Contact details.');
       return;
     }
-    try {
-      await providersApi.create({
-        name: providerName,
-        type: providerType,
-        location: providerLocation,
-        contact: providerContact,
-        approved_plans: ['plan-basic', 'plan-standard', 'plan-premium'],
-      }, currentUser.id, currentUser.name);
-      setProviderSuccess('Clinic partner registered successfully!');
-      setProviderName('');
-      setProviderLocation('');
-      setProviderContact('');
-      setShowProviderForm(false);
-      fetchStaffData();
-      onRefreshData();
-      setTimeout(() => setProviderSuccess(''), 3000);
-    } catch (err: any) {
-      setProviderError('Failed: ' + err.message);
-    }
+    const { error } = await providersApi.create({
+      name: providerName, type: providerType,
+      location: providerLocation, contact: providerContact,
+      approved_plans: ['plan-basic', 'plan-standard', 'plan-premium'],
+    }, currentUser.id, currentUser.name);
+    if (error) { setProviderError(error); return; }
+    showToast('Clinic partner registered successfully!', 'success');
+    setProviderName(''); setProviderLocation(''); setProviderContact('');
+    setShowProviderForm(false);
+    fetchStaffData(); onRefreshData();
   };
 
   // Save Config Settings
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setSettingsError('');
-    setSettingsSuccess('');
-    try {
-      await settingsApi.update({
-        allowAutoApprovalOfLowClaims: settingsAllowAuto,
-        lowClaimThreshold: Number(settingsThreshold),
-        autoSlaDays: Number(settingsSlaDays),
-        requireProviderAccreditation: settingsRequireAccreditation,
-        allowSelfClaimSubmission: settingsAllowSelfSubmit,
-      }, currentUser.id, currentUser.name);
-      setSettingsSuccess('System configuration parameters saved.');
-      fetchStaffData();
-      onRefreshData();
-      setTimeout(() => setSettingsSuccess(''), 3000);
-    } catch (err: any) {
-      setSettingsError('Failed: ' + err.message);
-    }
+    const { error } = await settingsApi.update({
+      allowAutoApprovalOfLowClaims: settingsAllowAuto,
+      lowClaimThreshold: Number(settingsThreshold),
+      autoSlaDays: Number(settingsSlaDays),
+      requireProviderAccreditation: settingsRequireAccreditation,
+      allowSelfClaimSubmission: settingsAllowSelfSubmit,
+    }, currentUser.id, currentUser.name);
+    if (error) { setSettingsError(error); return; }
+    showToast('System configuration parameters saved.', 'success');
+    fetchStaffData(); onRefreshData();
   };
 
   // Save Plan details (Create or Edit)
   const handleSavePlan = async (e: React.FormEvent) => {
     e.preventDefault();
     setPlanError('');
-    setPlanSuccess('');
 
     if (!planName || !planDescription || !planPremium || !planLimit) {
       setPlanError('Please fill out Name, Description, Premium, and Limits.');
@@ -329,35 +347,25 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
     }
 
     const payload = {
-      name: planName,
-      description: planDescription,
-      premium_amount: Number(planPremium),
-      coverage_limit: Number(planLimit),
+      name: planName, description: planDescription,
+      premium_amount: Number(planPremium), coverage_limit: Number(planLimit),
       benefits: planBenefits.split(',').map(s => s.trim()).filter(Boolean),
-      exclusions: planExclusions.split(',').map(s => s.trim()).filter(Boolean)
+      exclusions: planExclusions.split(',').map(s => s.trim()).filter(Boolean),
     };
 
-    try {
-      if (selectedPlan) {
-        await plansApi.update(selectedPlan.id, payload, currentUser.name);
-      } else {
-        await plansApi.create(payload, currentUser.name);
-      }
-      setPlanSuccess(selectedPlan ? 'Insurance plan updated successfully.' : 'New insurance plan created successfully.');
-      setPlanName('');
-      setPlanDescription('');
-      setPlanPremium('');
-      setPlanLimit('');
-      setPlanBenefits('');
-      setPlanExclusions('');
-      setSelectedPlan(null);
-      setShowPlanForm(false);
-      fetchStaffData();
-      onRefreshData();
-      setTimeout(() => setPlanSuccess(''), 3000);
-    } catch (err: any) {
-      setPlanError(err.message || 'Failed to save insurance plan.');
-    }
+    const { error } = selectedPlan
+      ? await plansApi.update(selectedPlan.id, payload, currentUser.name)
+      : await plansApi.create(payload, currentUser.name);
+
+    if (error) { setPlanError(error); return; }
+
+    showToast(
+      selectedPlan ? 'Insurance plan updated successfully.' : 'New insurance plan created successfully.',
+      'success'
+    );
+    setPlanName(''); setPlanDescription(''); setPlanPremium(''); setPlanLimit('');
+    setPlanBenefits(''); setPlanExclusions(''); setSelectedPlan(null); setShowPlanForm(false);
+    fetchStaffData(); onRefreshData();
   };
 
   const exportAllPoliciesToPDF = () => {
@@ -499,9 +507,27 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
 
   if (loading) {
     return (
-      <div className="max-w-7xl mx-auto p-12 text-center text-sm font-mono text-[#0D9488]">
-        <Clock className="h-5 w-5 animate-spin mx-auto mb-2" />
-        Synchronizing Adjuster Review Registers & Claim queues...
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+        <LoadingSkeleton variant="card" count={1} />
+        <LoadingSkeleton variant="table" rows={6} cols={7} />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-20 text-center">
+        <div className="inline-flex items-center justify-center h-16 w-16 rounded-2xl bg-red-50 mb-4">
+          <AlertTriangle className="h-8 w-8 text-red-500" />
+        </div>
+        <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Failed to load dashboard</h3>
+        <p className="text-sm text-slate-500 mb-6">{loadError}</p>
+        <button
+          onClick={fetchStaffData}
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium transition-colors"
+        >
+          <RefreshCw className="h-4 w-4" /> Retry
+        </button>
       </div>
     );
   }
@@ -619,17 +645,21 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
                     <th className="p-4 text-center">Action Wizard</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
                   {claims.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="p-8 text-center text-gray-400">
-                        No medical claims pending review.
+                      <td colSpan={7}>
+                        <EmptyState
+                          icon={FileCheck}
+                          title="No claims in the pipeline"
+                          message="Claims submitted by members and providers will appear here for adjudication."
+                        />
                       </td>
                     </tr>
                   ) : (
                     claims.map((c: any) => (
-                      <tr key={c.id} className={`hover:bg-slate-50 transition-colors ${c.is_flagged ? 'bg-amber-50/50' : ''}`}>
-                        <td className="p-4 font-mono font-bold text-[#0A1628]">{c.id}</td>
+                      <tr key={c.id} className={`hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors ${c.is_flagged ? 'bg-amber-50/50 dark:bg-amber-900/10' : ''}`}>
+                        <td className="p-4 font-mono font-bold text-[#0A1628] dark:text-white text-[10px]">{c.id}</td>
                         <td className="p-4">
                           <span className="font-bold text-gray-800 block">{c.holder_name}</span>
                           <span className="text-[10px] text-gray-400 font-mono">National ID: {c.holder_national_id}</span>
@@ -824,13 +854,7 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
                       <td className="p-4 text-[11px] text-gray-500">{p.start_date} to {p.end_date}</td>
                       <td className="p-4 uppercase">{p.premium_frequency}</td>
                       <td className="p-4">
-                        <span className={`text-[10px] uppercase font-bold px-2.5 py-0.5 rounded ${
-                          p.status === 'active' ? 'bg-[#0D9488]/15 text-[#0D9488]' :
-                          p.status === 'suspended' ? 'bg-amber-100 text-amber-800' :
-                          'bg-red-100 text-red-800'
-                        }`}>
-                          ● {p.status}
-                        </span>
+                        <StatusBadge status={p.status ?? 'neutral'} />
                       </td>
                       <td className="p-4 text-center space-x-2">
                         {p.status !== 'terminated' ? (
@@ -909,8 +933,13 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
                 <tbody className="divide-y divide-gray-100">
                   {membersList.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="p-8 text-center text-gray-400">
-                        No members found matching query.
+                      <td colSpan={6}>
+                        <EmptyState
+                          icon={Users}
+                          title={memberSearch ? 'No matching members' : 'No members registered'}
+                          message={memberSearch ? 'Try a different name, email, or National ID.' : 'Registered policyholders will appear here.'}
+                          compact
+                        />
                       </td>
                     </tr>
                   ) : (
@@ -938,11 +967,7 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
                             </span>
                           </td>
                           <td className="p-4">
-                            <span className={`text-[10px] uppercase font-bold font-mono px-2 py-0.5 rounded ${
-                              isSuspended ? 'bg-red-100 text-red-800 border border-red-200' : 'bg-emerald-100 text-emerald-800'
-                            }`}>
-                              ● {m.status || 'active'}
-                            </span>
+                            <StatusBadge status={isSuspended ? 'suspended' : 'active'} />
                           </td>
                           <td className="p-4 text-right space-x-2">
                             {isSuspended ? (
@@ -1012,20 +1037,20 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100 font-mono">
-                    {premiums.map(p => (
-                      <tr key={p.id}>
-                        <td className="p-4 font-bold text-gray-700">{p.id}</td>
-                        <td className="p-4 font-sans font-bold text-gray-900">{p.holder_name}</td>
-                        <td className="p-4 font-sans text-gray-500">{p.plan_name}</td>
-                        <td className="p-4 text-center font-bold font-sans text-[#0A1628]">UGX {p.amount.toLocaleString()}</td>
+                    {premiums.length === 0 ? (
+                      <tr><td colSpan={6}>
+                        <EmptyState icon={DollarSign} title="No premium records" message="Premium invoices will appear here once policies are issued." compact />
+                      </td></tr>
+                    ) : premiums.map((p: any) => (
+                      <tr key={p.id} className="dark:bg-slate-800 dark:border-slate-700">
+                        <td className="p-4 font-bold text-gray-700 dark:text-slate-300">{p.id}</td>
+                        <td className="p-4 font-sans font-bold text-gray-900 dark:text-white">{(p as any).policies?.profiles?.name ?? p.holder_name ?? '—'}</td>
+                        <td className="p-4 font-sans text-gray-500 dark:text-slate-400">{(p as any).policies?.plans?.name ?? p.plan_name ?? '—'}</td>
+                        <td className="p-4 text-center font-bold font-sans text-[#0A1628] dark:text-white">UGX {p.amount?.toLocaleString()}</td>
                         <td className="p-4">
-                          <span className={`text-[9px] uppercase font-bold px-2 rounded ${
-                            p.status === 'paid' ? 'bg-teal-100 text-teal-800' : 'bg-red-100 text-red-800 font-black animate-pulse'
-                          }`}>
-                            {p.status}
-                          </span>
+                          <StatusBadge status={p.status === 'paid' ? 'paid' : p.status === 'overdue' ? 'overdue' : 'unpaid'} />
                         </td>
-                        <td className="p-4 text-[#0D9488] font-bold">{p.receipt_number || '--'}</td>
+                        <td className="p-4 text-[#0D9488] font-bold">{p.receipt_number || '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1161,12 +1186,7 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
                       <td className="p-4 text-slate-600">{p.location}</td>
                       <td className="p-4 font-mono text-slate-500">{p.contact}</td>
                       <td className="p-4">
-                        <span className={`text-[9px] font-mono font-bold uppercase px-2 py-0.5 rounded ${
-                          p.accreditation_status === 'accredited' ? 'bg-teal-100 text-teal-800' :
-                          p.accreditation_status === 'suspended' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
-                        }`}>
-                          {p.accreditation_status}
-                        </span>
+                        <StatusBadge status={p.accreditation_status === 'accredited' ? 'accredited' : p.accreditation_status === 'suspended' ? 'suspended' : 'pending'} size="xs" />
                       </td>
                       <td className="p-4 text-right space-x-1 whitespace-nowrap">
                         {p.accreditation_status !== 'accredited' && (
@@ -1524,25 +1544,36 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 font-mono">
-                  {auditLogs
-                    .filter(l => {
+                  {(() => {
+                    const filtered = auditLogs.filter(l => {
                       const query = auditSearch.toLowerCase();
                       return (
-                        l.user_name.toLowerCase().includes(query) ||
-                        l.action.toLowerCase().includes(query) ||
-                        l.entity.toLowerCase().includes(query) ||
-                        l.entity_id.toLowerCase().includes(query)
+                        l.user_name?.toLowerCase().includes(query) ||
+                        l.action?.toLowerCase().includes(query) ||
+                        l.entity?.toLowerCase().includes(query) ||
+                        l.entity_id?.toLowerCase().includes(query)
                       );
-                    })
-                    .map(l => (
-                      <tr key={l.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="p-4 text-gray-500 font-bold whitespace-nowrap">{new Date(l.timestamp).toLocaleString()}</td>
-                        <td className="p-4 font-sans font-bold text-slate-900 whitespace-nowrap">{l.user_name}</td>
+                    });
+                    if (filtered.length === 0) return (
+                      <tr><td colSpan={5}>
+                        <EmptyState
+                          icon={Shield}
+                          title={auditSearch ? 'No matching events' : 'No audit events yet'}
+                          message={auditSearch ? 'Try a different search term.' : 'System actions will be logged here.'}
+                          compact
+                        />
+                      </td></tr>
+                    );
+                    return filtered.map((l: any) => (
+                      <tr key={l.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
+                        <td className="p-4 text-gray-500 dark:text-slate-400 font-bold whitespace-nowrap">{new Date(l.timestamp).toLocaleString()}</td>
+                        <td className="p-4 font-sans font-bold text-slate-900 dark:text-white whitespace-nowrap">{l.user_name}</td>
                         <td className="p-4 uppercase font-black text-[10px] whitespace-nowrap text-[#0D9488]">{l.action}</td>
-                        <td className="p-4 text-gray-500 lowercase whitespace-nowrap">{l.entity}</td>
-                        <td className="p-4 text-[#0A1628] font-bold whitespace-nowrap">{l.entity_id}</td>
+                        <td className="p-4 text-gray-500 dark:text-slate-400 lowercase whitespace-nowrap">{l.entity}</td>
+                        <td className="p-4 text-[#0A1628] dark:text-white font-bold whitespace-nowrap">{l.entity_id}</td>
                       </tr>
-                    ))}
+                    ));
+                  })()}
                 </tbody>
               </table>
             </div>
@@ -1551,5 +1582,13 @@ export default function StaffDashboard({ currentUser, onRefreshData }: StaffDash
       )}
 
     </div>
+  );
+}
+
+export default function StaffDashboard(props: StaffDashboardProps) {
+  return (
+    <ErrorBoundary section="Staff Dashboard">
+      <StaffDashboardInner {...props} />
+    </ErrorBoundary>
   );
 }

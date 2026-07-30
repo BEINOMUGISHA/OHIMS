@@ -54,8 +54,9 @@ export default function AuthModal({ onDismiss, onLoginSuccess, plans }: AuthModa
     setLoginError('');
     setLoginLoading(true);
     try {
-      const data = await authApi.login(loginEmail, loginPassword);
-      onLoginSuccess(data.token);
+      const { data, error } = await authApi.login(loginEmail, loginPassword);
+      if (error || !data) throw new Error(error ?? 'Authentication failed.');
+      onLoginSuccess((data as any).token ?? (data as any).user?.id);
       onDismiss();
     } catch (err: any) {
       let msg = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err)) || 'Authentication failed. Check credentials and try again.';
@@ -84,7 +85,7 @@ export default function AuthModal({ onDismiss, onLoginSuccess, plans }: AuthModa
 
     setRegLoading(true);
     try {
-      const data = await authApi.register({
+      const { data, error: regError } = await authApi.register({
         name: regName,
         email: regEmail,
         password: regPassword,
@@ -97,16 +98,19 @@ export default function AuthModal({ onDismiss, onLoginSuccess, plans }: AuthModa
         premium_frequency: regFreq,
       });
 
+      if (regError) throw new Error(regError);
+      const regData = data as any;
+
       // Email confirmation required — show message and stay on modal
-      if (data.emailConfirmationRequired) {
-        setRegSuccess(data.message || 'Registration successful! Please check your email to confirm your account before signing in.');
+      if (regData?.emailConfirmationRequired) {
+        setRegSuccess(regData.message || 'Registration successful! Please check your email to confirm your account before signing in.');
         return;
       }
 
       // Instant access (email confirmation disabled)
       setRegSuccess('Account created successfully! Forwarding to Member Dashboard...');
       setTimeout(() => {
-        onLoginSuccess(data.user.id);
+        onLoginSuccess(regData?.user?.id ?? regData?.id);
         onDismiss();
       }, 1500);
     } catch (err: any) {
@@ -125,8 +129,9 @@ export default function AuthModal({ onDismiss, onLoginSuccess, plans }: AuthModa
     setResetError('');
     setResetSuccess('');
     try {
-      const data = await authApi.resetPassword(resetEmail, resetPassword);
-      setResetSuccess(data.message || 'Password reset successful!');
+      const { data, error: resetErr } = await authApi.resetPassword(resetEmail, resetPassword);
+      if (resetErr) throw new Error(resetErr);
+      setResetSuccess((data as any)?.message || 'Password reset successful!');
       setTimeout(() => {
         setActiveTab('login');
         setLoginEmail(resetEmail);

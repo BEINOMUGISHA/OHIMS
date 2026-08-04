@@ -278,6 +278,7 @@ function AppInner() {
                 <DashboardPage
                   currentUser={currentUser!}
                   onRefreshData={handleRefreshAllData}
+                  theme={theme}
                 />
               </ProtectedRoute>
             }

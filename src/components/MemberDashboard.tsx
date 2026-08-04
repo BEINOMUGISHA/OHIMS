@@ -154,29 +154,66 @@ function MemberDashboardInner({ currentUser, onRefreshData }: MemberDashboardPro
     try {
       setLoading(true);
       // Fetch full member profile with nested policies, premiums, beneficiaries
-      const { data: details, error } = await membersApi.get(currentUser.id);
-      if (error || !details) { console.error('fetchProfile error:', error); setLoading(false); return; }
-      setMemberData(details);
+      const details = await membersApi.get(currentUser.id);
+      const profile = details || {};
+      const policies = profile.policies || [];
+      const activePolicy = policies[0] || null;
+
+      let claimsList: any[] = [];
+      if (activePolicy?.id) {
+        try {
+          claimsList = await claimsApi.list({ policy_id: activePolicy.id });
+        } catch (e) {
+          console.warn('Failed to fetch claims for policy:', e);
+        }
+      }
+
+      const premiumsList = activePolicy?.premiums || [];
+      const beneficiariesList = activePolicy?.beneficiaries || [];
+
+      const normalizedData = {
+        member: {
+          id: profile.id || currentUser.id,
+          name: profile.name || currentUser.name,
+          email: profile.email || currentUser.email,
+          phone: profile.phone || currentUser.phone || '',
+          national_id: profile.national_id || '',
+          dob: profile.dob || '',
+          gender: profile.gender || 'male',
+          address: profile.address || 'Kampala, Uganda',
+          active_policy: activePolicy ? {
+            id: activePolicy.id,
+            plan_name: activePolicy.plans?.name || 'Enrolled Coverage Plan',
+            plan_limit: activePolicy.coverage_limit || activePolicy.plans?.coverage_limit || 5000000,
+            remaining_coverage: activePolicy.remaining_coverage || 5000000,
+            status: activePolicy.status || 'active',
+          } : null,
+        },
+        policies: policies,
+        claims: claimsList || [],
+        premiums: premiumsList || [],
+        beneficiaries: beneficiariesList || [],
+      };
+
+      setMemberData(normalizedData);
 
       // Prepopulate settings form
-      const d = details as any;
-      if (d) {
-        setSettingsAddress(d.address || '');
-        setSettingsPhone(d.phone || currentUser.phone || '');
-        setSettingsDob(d.dob || '');
-        setSettingsGender(d.gender || 'male');
-        setSettingsNationalId(d.national_id || '');
-        setSettingsPhoto(d.avatar_url || '');
+      if (profile) {
+        setSettingsAddress(profile.address || '');
+        setSettingsPhone(profile.phone || currentUser.phone || '');
+        setSettingsDob(profile.dob || '');
+        setSettingsGender(profile.gender || 'male');
+        setSettingsNationalId(profile.national_id || '');
+        setSettingsPhoto(profile.avatar_url || '');
       }
 
       // Prepopulate claim policy id if policy exists
-      const policies = d?.policies;
-      if (policies && policies.length > 0) {
-        setClaimPlanId(policies[0].id);
+      if (activePolicy) {
+        setClaimPlanId(activePolicy.id);
       }
 
       // Fetch providers for Clinic Finder
-      const { data: provData } = await providersApi.list();
+      const provData = await providersApi.list();
       setProviders((provData as unknown as Provider[]) ?? []);
     } catch (e) {
       console.error('Error fetching member stats', e);
@@ -1128,8 +1165,12 @@ function MemberDashboardInner({ currentUser, onRefreshData }: MemberDashboardPro
     );
   }
 
-  const activePolicy = memberData.policies[0];
-  const outstandingPremiums = memberData.premiums.filter((p: Premium) => p.status !== 'paid');
+  const policies = memberData?.policies || [];
+  const activePolicy = policies[0] || null;
+  const premiums = memberData?.premiums || [];
+  const claims = memberData?.claims || [];
+  const beneficiaries = memberData?.beneficiaries || [];
+  const outstandingPremiums = premiums.filter((p: Premium) => p.status !== 'paid');
 
   const getPolicyExpiryDays = () => {
     if (!activePolicy) return null;

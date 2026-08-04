@@ -270,7 +270,7 @@ class LocalDatabase {
       {
         id: 'mem-1',
         name: 'Mugisha Innocent (User)',
-        email: 'beinomugishainnocent2001@gmail.com',// Matches the developer email from metadata for smooth login testing!
+        email: 'member@ohims.gov.ug',// Standard sandbox member email
         phone: '+256 789 123456',
         national_id: 'CM0102198U890P',
         dob: '2001-09-12',

@@ -111,7 +111,7 @@ function AppInner() {
         admin:    { email: 'admin@ohims.gov.ug',               pass: 'admin123' },
         staff:    { email: 'staff@ohims.gov.ug',               pass: 'staff123' },
         provider: { email: 'mulago@ohims.gov.ug',              pass: 'provider123' },
-        member:   { email: 'beinomugishainnocent2001@gmail.com', pass: 'member123' },
+        member:   { email: 'member@ohims.gov.ug',               pass: 'member123' },
       };
 
       const target = demoMap[accountKey] || { email: accountKey, pass: 'member123' };

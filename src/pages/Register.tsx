@@ -285,7 +285,7 @@ export default function Register({ plans, onLoginSuccess }: RegisterPageProps) {
               <div className="relative">
                 <UserIcon className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                 <input type="text" required value={name} onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Innocent Beinomugisha"
+                  placeholder="e.g. Sarah Kaggwa"
                   className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-[#0D9488] outline-none" />
               </div>
             </div>
@@ -318,7 +318,7 @@ export default function Register({ plans, onLoginSuccess }: RegisterPageProps) {
               <div className="relative">
                 <Phone className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                 <input type="text" required value={phone} onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+256786834364"
+                  placeholder="+256770000000"
                   className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-[#0D9488] outline-none" />
               </div>
             </div>

@@ -53,9 +53,12 @@ async function addNotification(
 
 export const authApi = {
   /**
-   * Register a new member.
-   * Creates a Supabase Auth user then upserts profile + policy + premium.
-   * Self-heals if the user already exists in Supabase Auth.
+   * Role-Based Registration with Access Code Validation.
+   * Prevents impersonation: each role requires a secret access code.
+   * Member → open registration (no code needed)
+   * Staff  → requires STAFF-OHIMS-2026
+   * Provider/Clinic → requires CLINIC-OHIMS-2026
+   * Admin  → requires ADMIN-OHIMS-2026
    */
   register: async (payload: {
     name: string;
@@ -68,13 +71,37 @@ export const authApi = {
     address: string;
     selected_plan_id: string;
     premium_frequency: string;
+    role?: string;
+    access_code?: string;
   }): Promise<ApiResponse<{ user: unknown; emailConfirmationRequired?: boolean; message?: string }>> => {
     return safeCall(async () => {
       const {
         name, email, password, phone, national_id,
         dob, gender, address, selected_plan_id, premium_frequency,
+        role = 'member', access_code = '',
       } = payload;
 
+      // ── Access Code Validation ─────────────────────────────────────
+      const ROLE_ACCESS_CODES: Record<string, string> = {
+        admin:    'ADMIN-OHIMS-2026',
+        staff:    'STAFF-OHIMS-2026',
+        provider: 'CLINIC-OHIMS-2026',
+        member:   '',  // members can register freely
+      };
+
+      const validRoles = Object.keys(ROLE_ACCESS_CODES);
+      if (!validRoles.includes(role)) {
+        throw new Error(`Invalid role "${role}". Choose: Member, Staff, Clinic Provider, or Admin.`);
+      }
+
+      const requiredCode = ROLE_ACCESS_CODES[role];
+      if (requiredCode && access_code.trim() !== requiredCode) {
+        throw new Error(
+          `Invalid access code for ${role} role. Please contact your OHIMS system administrator for the correct code.`
+        );
+      }
+
+      // ── Supabase Auth Sign Up ──────────────────────────────────────
       let userId: string;
       let hasSession = false;
 
@@ -82,7 +109,7 @@ export const authApi = {
         email,
         password,
         options: {
-          data: { name, role: 'member', phone, national_id, dob, gender, address, selected_plan_id, premium_frequency },
+          data: { name, role, phone, national_id, dob, gender, address, selected_plan_id, premium_frequency },
         },
       });
 
@@ -109,45 +136,55 @@ export const authApi = {
         };
       }
 
+      // ── Save Profile with Correct Role ────────────────────────────
       const profileData = {
-        id: userId, email, name, role: 'member', status: 'active',
+        id: userId, email, name, role, status: 'active',
         phone, national_id, dob: dob || null, gender, address,
       };
 
       const { error: profErr } = await supabase.from('profiles').upsert(profileData);
       if (profErr) console.warn('Profile upsert warning:', profErr.message);
 
-      const { data: existingPolicies } = await supabase.from('policies').select('id').eq('user_id', userId);
+      // ── Only create policy for Member role ────────────────────────
+      if (role === 'member') {
+        const { data: existingPolicies } = await supabase.from('policies').select('id').eq('user_id', userId);
 
-      if (!existingPolicies || existingPolicies.length === 0) {
-        const { data: plan } = await supabase.from('plans').select('*').eq('id', selected_plan_id).single();
-        const planLimit = plan?.coverage_limit ?? 5000000;
-        const planRate = plan?.premium_amount ?? 45000;
-        const policyId = generatePolicyId();
-        const startDate = new Date().toISOString().split('T')[0];
-        const endDate = new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0];
+        if (!existingPolicies || existingPolicies.length === 0) {
+          const { data: plan } = await supabase.from('plans').select('*').eq('id', selected_plan_id).single();
+          const planLimit = plan?.coverage_limit ?? 5000000;
+          const planRate = plan?.premium_amount ?? 45000;
+          const policyId = generatePolicyId();
+          const startDate = new Date().toISOString().split('T')[0];
+          const endDate = new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0];
 
-        await supabase.from('policies').insert({
-          id: policyId, user_id: userId, plan_id: selected_plan_id,
-          status: 'active', start_date: startDate, end_date: endDate,
-          premium_rate: planRate, coverage_limit: planLimit, remaining_coverage: planLimit,
-        });
+          await supabase.from('policies').insert({
+            id: policyId, user_id: userId, plan_id: selected_plan_id,
+            status: 'active', start_date: startDate, end_date: endDate,
+            premium_rate: planRate, coverage_limit: planLimit, remaining_coverage: planLimit,
+          });
 
-        const premDue = new Date();
-        premDue.setDate(premDue.getDate() + 30);
-        const paymentRef = uuidv4();
-        await supabase.from('premiums').insert({
-          policy_id: policyId, amount: planRate, status: 'unpaid',
-          due_date: premDue.toISOString().split('T')[0], payment_reference: paymentRef,
-        });
+          const premDue = new Date();
+          premDue.setDate(premDue.getDate() + 30);
+          const paymentRef = uuidv4();
+          await supabase.from('premiums').insert({
+            policy_id: policyId, amount: planRate, status: 'unpaid',
+            due_date: premDue.toISOString().split('T')[0], payment_reference: paymentRef,
+          });
 
-        await addNotification(userId, `Welcome to OHIMS Uganda! Your policy ${policyId} is active.`, 'success');
+          await addNotification(userId, `Welcome to OHIMS Uganda! Your policy ${policyId} is now active. Your first premium is due in 30 days.`, 'success');
+        }
+      } else {
+        // Staff, Admin, Provider welcome notification
+        const roleLabel = role === 'admin' ? 'Administrator' : role === 'staff' ? 'Staff Officer' : 'Clinic Provider';
+        await addNotification(userId, `Welcome to OHIMS Uganda! Your ${roleLabel} account is now active.`, 'success');
       }
 
       const { data: profile } = await supabase.from('profiles').select('*').eq('id', userId).single();
       return { user: profile || profileData };
     });
   },
+
+
 
   /**
    * Sign in with email + password via Supabase Auth.

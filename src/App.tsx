@@ -103,14 +103,8 @@ function AppInner() {
     setLoading(false);
   };
 
-  // Handle sandbox user switcher — only available in DEMO_MODE
+  // Handle sandbox user switcher
   const handleUserSwap = async (accountKey: string) => {
-    // Gate demo credentials behind VITE_DEMO_MODE env flag
-    if ((import.meta as any).env?.VITE_DEMO_MODE !== 'true') {
-      showToast('Demo mode is disabled in this environment.', 'warning');
-      return;
-    }
-
     setLoading(true);
     try {
       const demoMap: Record<string, { email: string; pass: string }> = {
@@ -127,11 +121,14 @@ function AppInner() {
       } else if (result.data) {
         setCurrentUser((result.data as any).user as unknown as User);
         fetchNotifications((result.data as any).user.id);
+        showToast(`Switched to ${accountKey.toUpperCase()} role`, 'info');
       }
-    } catch (e) {
-      showToast('User swap failed. Please try again.', 'error');
+    } catch (e: any) {
+      console.error('User swap failed:', e);
+      showToast(e?.message || 'User swap failed', 'error');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   // Mark single notification as read

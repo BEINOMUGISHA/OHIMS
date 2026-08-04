@@ -54,7 +54,7 @@ function ProviderDashboardInner({ currentUser, onRefreshData }: ProviderDashboar
   const [submittingClaim, setSubmittingClaim] = useState(false);
 
   // Tab & Eligibility state
-  const [activeTab, setActiveTab] = useState<'claims' | 'eligibility'>('claims');
+  const [activeTab, setActiveTab] = useState<'claims' | 'eligibility' | 'clients'>('claims');
   const [eligibilityNIN, setEligibilityNIN] = useState('');
   const [eligibilityResult, setEligibilityResult] = useState<any | null>(null);
   const [checkingEligibility, setCheckingEligibility] = useState(false);
@@ -477,10 +477,16 @@ function ProviderDashboardInner({ currentUser, onRefreshData }: ProviderDashboar
           Clinical Claims Queue ({providerClaims.length})
         </button>
         <button
+          onClick={() => setActiveTab('clients')}
+          className={`py-3 px-4 font-bold text-xs border-b-2 transition-colors flex-shrink-0 cursor-pointer ${activeTab === 'clients' ? 'border-[#0D9488] text-[#0D9488]' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+        >
+          👥 Registered Clients &amp; Patient Roster ({patients.length})
+        </button>
+        <button
           onClick={() => setActiveTab('eligibility')}
           className={`py-3 px-4 font-bold text-xs border-b-2 transition-colors flex-shrink-0 cursor-pointer ${activeTab === 'eligibility' ? 'border-[#0D9488] text-[#0D9488]' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
         >
-          🔍 Patient Eligibility &amp; Coverage Verification
+          🔍 Instant NIN Coverage Verification
         </button>
       </div>
 
@@ -536,6 +542,110 @@ function ProviderDashboardInner({ currentUser, onRefreshData }: ProviderDashboar
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Patients / Clients Tab */}
+      {activeTab === 'clients' && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white dark:bg-slate-800 p-6 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm">
+            <div>
+              <h3 className="text-lg font-black text-[#0A1628] dark:text-white">Healthcare Provider Client Registry</h3>
+              <p className="text-xs text-gray-500 dark:text-slate-400">
+                View registered OHIMS patients, active coverage limits, and file claims directly.
+              </p>
+            </div>
+            <div className="relative w-full sm:w-72">
+              <Search className="h-4 w-4 absolute left-3 top-3 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search client name, NIN, policy..."
+                value={patientSearch}
+                onChange={(e) => setPatientSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 border border-gray-200 dark:border-slate-600 rounded-xl text-xs bg-white dark:bg-slate-700 dark:text-white outline-none focus:ring-1 focus:ring-[#0D9488]"
+              />
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left font-sans text-xs">
+                <thead className="bg-[#0A1628] text-white font-mono uppercase tracking-wider text-[10px]">
+                  <tr>
+                    <th className="p-4">Client / Patient</th>
+                    <th className="p-4">National ID (NIN)</th>
+                    <th className="p-4">Contact Phone</th>
+                    <th className="p-4">Active Policy</th>
+                    <th className="p-4">Remaining Balance</th>
+                    <th className="p-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
+                  {filteredPatients.length === 0 ? (
+                    <tr>
+                      <td colSpan={6}>
+                        <EmptyState
+                          icon={Users}
+                          title={patientSearch ? 'No matching clients found' : 'No clients registered yet'}
+                          message={patientSearch ? 'Try a different search term.' : 'Registered policyholders will appear here.'}
+                          compact
+                        />
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredPatients.map((p: any) => {
+                      const activePol = p.active_policy || p.policies?.find((pol: any) => pol.status === 'active') || p.policies?.[0];
+                      return (
+                        <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
+                          <td className="p-4">
+                            <div className="flex items-center gap-3">
+                              <div className="h-8 w-8 rounded-full bg-teal-800 text-white font-mono font-bold flex items-center justify-center text-xs shrink-0">
+                                {p.name?.[0]?.toUpperCase()}
+                              </div>
+                              <div>
+                                <span className="font-bold text-[#0A1628] dark:text-white block">{p.name}</span>
+                                <span className="text-[10px] text-gray-400 font-mono">{p.email}</span>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-4 font-mono font-semibold text-gray-700 dark:text-slate-300">{p.national_id || 'N/A'}</td>
+                          <td className="p-4 font-mono text-gray-500 dark:text-slate-400">{p.phone || 'N/A'}</td>
+                          <td className="p-4">
+                            {activePol ? (
+                              <span className="bg-teal-50 text-[#0D9488] font-bold font-mono text-[10px] uppercase px-2.5 py-1 rounded-lg border border-teal-100">
+                                {activePol.plan_name || activePol.plans?.name || 'Standard Coverage'}
+                              </span>
+                            ) : (
+                              <span className="text-red-500 font-mono text-[10px] uppercase font-bold">No Active Policy</span>
+                            )}
+                          </td>
+                          <td className="p-4 font-mono font-bold text-emerald-600">
+                            {activePol ? `UGX ${(activePol.remaining_coverage || activePol.coverage_limit || 5000000).toLocaleString()}` : '—'}
+                          </td>
+                          <td className="p-4 text-right">
+                            {activePol ? (
+                              <button
+                                onClick={() => {
+                                  setSelectedPolicyId(activePol.id);
+                                  setShowClaimForm(true);
+                                  setActiveTab('claims');
+                                }}
+                                className="bg-[#0D9488] hover:bg-[#0b7e74] text-white font-bold text-[10px] px-3 py-1.5 rounded-lg shadow-sm cursor-pointer transition-colors"
+                              >
+                                + File Claim
+                              </button>
+                            ) : (
+                              <span className="text-xs text-gray-400 font-mono">Ineligible</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 

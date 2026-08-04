@@ -25,6 +25,22 @@ import { User, Claim } from '../types';
 import {
   claimsApi, policiesApi, premiumsApi, providersApi, plansApi, settingsApi, auditApi, usersApi
 } from '../lib/api';
+
+// Western Uganda + Kampala Referral Hospitals
+const WESTERN_UG_CLINICS = [
+  { name: 'Mulago National Referral Hospital', location: 'Kampala, Central Uganda', type: 'hospital', contact: '+256414530220' },
+  { name: 'Mbarara Regional Referral Hospital', location: 'Mbarara, Western Uganda', type: 'hospital', contact: '+256485421277' },
+  { name: 'Fort Portal Regional Referral Hospital', location: 'Fort Portal, Kabarole District', type: 'hospital', contact: '+256483422375' },
+  { name: 'Kabale Regional Referral Hospital', location: 'Kabale, Kigezi Sub-region', type: 'hospital', contact: '+256486422004' },
+  { name: 'Masaka Regional Referral Hospital', location: 'Masaka, Central Uganda', type: 'hospital', contact: '+256481420228' },
+  { name: 'Ishaka Adventist Hospital', location: 'Ishaka, Bushenyi District', type: 'hospital', contact: '+256485425010' },
+  { name: 'Kitagata Hospital', location: 'Sheema District, Western Uganda', type: 'hospital', contact: '+256 77 2456789' },
+  { name: 'Bwindi Community Hospital', location: 'Bwindi, Kanungu District', type: 'hospital', contact: '+256 77 3456789' },
+  { name: 'St. Francis Hospital Mutolere', location: 'Kisoro District, Western Uganda', type: 'hospital', contact: '+256 77 4567890' },
+  { name: 'Rugarama Hospital', location: 'Kabale District, Kigezi', type: 'hospital', contact: '+256 77 5678901' },
+  { name: 'Case Medical Centre', location: 'Kampala, Central Uganda', type: 'clinic', contact: '+256312260736' },
+  { name: 'International Hospital Kampala', location: 'Kampala, Central Uganda', type: 'hospital', contact: '+256312200400' },
+];
 import ErrorBoundary from './ui/ErrorBoundary';
 import LoadingSkeleton from './ui/LoadingSkeleton';
 import EmptyState from './ui/EmptyState';
@@ -49,6 +65,8 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
   const [memberSearch, setMemberSearch] = useState('');
   const [memberActionLoading, setMemberActionLoading] = useState(false);
   const [memberActionMsg, setMemberActionMsg] = useState('');
+  const [selectedMember, setSelectedMember] = useState<any | null>(null);
+  const [memberRoleFilter, setMemberRoleFilter] = useState<string>('all');
 
   // Provider states
   const [providers, setProviders] = useState<any[]>([]);
@@ -107,7 +125,7 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
       plansApi.list(),
       settingsApi.get(),
       auditApi.list(),
-      usersApi.listMembers(),
+      usersApi.listAllUsers(),
     ]);
 
     const [claimsRes, polRes, premRes, provRes, plansRes, settingsRes, logsRes, membersRes] = results;
@@ -155,7 +173,7 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
       showToast(`Failed to suspend member: ${error}`, 'error');
     } else {
       showToast('Member and active policy suspended successfully.', 'success');
-      const { data: updated } = await usersApi.listMembers(memberSearch);
+      const { data: updated } = await usersApi.listAllUsers(memberSearch);
       if (updated) setMembersList(updated as any[]);
       onRefreshData();
     }
@@ -169,7 +187,7 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
       showToast(`Failed to reinstate member: ${error}`, 'error');
     } else {
       showToast('Member and active policy reinstated successfully.', 'success');
-      const { data: updated } = await usersApi.listMembers(memberSearch);
+      const { data: updated } = await usersApi.listAllUsers(memberSearch);
       if (updated) setMembersList(updated as any[]);
       onRefreshData();
     }
@@ -178,7 +196,7 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
 
   const handleSearchMembers = async (query: string) => {
     setMemberSearch(query);
-    const { data: results } = await usersApi.listMembers(query);
+    const { data: results } = await usersApi.listAllUsers(query);
     if (results) setMembersList(results as any[]);
   };
 
@@ -891,111 +909,233 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
         </div>
       )}
 
-      {/* ==================== TAB MEMBER MANAGEMENT ==================== */}
+      {/* ==================== TAB USER REGISTRY (ALL ROLES) ==================== */}
       {activeTab === 'members' && (
         <div className="space-y-6">
+          {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
             <div>
-              <h3 className="text-lg font-black text-[#0A1628]">Member Management & Account Status</h3>
-              <p className="text-xs text-gray-500">View, search, suspend or reinstate registered policyholders</p>
+              <h3 className="text-lg font-black text-[#0A1628]">User Registry — All Accounts</h3>
+              <p className="text-xs text-gray-500">View, search and manage all registered users across every role</p>
             </div>
-            <div className="relative w-full sm:w-72">
-              <Search className="h-4 w-4 absolute left-3 top-3 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search name, email, National ID..."
-                value={memberSearch}
-                onChange={e => handleSearchMembers(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-xs bg-white outline-none focus:ring-1 focus:ring-[#0D9488]"
-              />
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+              {/* Role Filter */}
+              <select
+                value={memberRoleFilter}
+                onChange={e => setMemberRoleFilter(e.target.value)}
+                className="px-3 py-2 border border-gray-200 rounded-xl text-xs bg-white outline-none focus:ring-1 focus:ring-[#0D9488]"
+              >
+                <option value="all">All Roles</option>
+                <option value="member">👤 Members</option>
+                <option value="staff">💼 Staff</option>
+                <option value="admin">👑 Admins</option>
+                <option value="provider">🏥 Providers</option>
+              </select>
+              {/* Search */}
+              <div className="relative w-full sm:w-64">
+                <Search className="h-4 w-4 absolute left-3 top-3 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search name, email, NIN, role..."
+                  value={memberSearch}
+                  onChange={e => handleSearchMembers(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-xs bg-white outline-none focus:ring-1 focus:ring-[#0D9488]"
+                />
+              </div>
             </div>
           </div>
 
           {memberActionMsg && (
-            <div className="p-3 bg-teal-50 text-teal-700 border border-teal-200 rounded-xl text-xs font-bold">
-              {memberActionMsg}
-            </div>
+            <div className="p-3 bg-teal-50 text-teal-700 border border-teal-200 rounded-xl text-xs font-bold">{memberActionMsg}</div>
           )}
 
+          {/* User Table */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="min-w-full text-left font-sans text-xs">
                 <thead className="bg-[#0A1628] text-white font-mono uppercase tracking-wider text-[10px]">
                   <tr>
-                    <th className="p-4">Member Name</th>
-                    <th className="p-4">National ID</th>
-                    <th className="p-4">Phone</th>
-                    <th className="p-4">Active Plan</th>
-                    <th className="p-4">Account Status</th>
+                    <th className="p-4">Name & Email</th>
+                    <th className="p-4">Role</th>
+                    <th className="p-4">NIN / Phone</th>
+                    <th className="p-4">Policy / Plan</th>
+                    <th className="p-4">Status</th>
                     <th className="p-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {membersList.length === 0 ? (
-                    <tr>
-                      <td colSpan={6}>
-                        <EmptyState
-                          icon={Users}
-                          title={memberSearch ? 'No matching members' : 'No members registered'}
-                          message={memberSearch ? 'Try a different name, email, or National ID.' : 'Registered policyholders will appear here.'}
-                          compact
-                        />
-                      </td>
-                    </tr>
+                  {membersList
+                    .filter((m: any) => memberRoleFilter === 'all' || m.role === memberRoleFilter)
+                    .length === 0 ? (
+                    <tr><td colSpan={6}>
+                      <EmptyState icon={Users} title="No users found" message="Try a different search or role filter." compact />
+                    </td></tr>
                   ) : (
-                    membersList.map((m: any) => {
-                      const activePolicy = m.policies?.find((p: any) => p.status === 'active') || m.policies?.[0];
-                      const isSuspended = m.status === 'suspended';
-                      return (
-                        <tr key={m.id} className="hover:bg-slate-50 transition-colors">
-                          <td className="p-4">
-                            <div className="flex items-center gap-3">
-                              <div className="h-8 w-8 rounded-full bg-teal-800 text-white font-mono font-bold flex items-center justify-center text-xs">
-                                {m.name?.[0]?.toUpperCase()}
+                    membersList
+                      .filter((m: any) => memberRoleFilter === 'all' || m.role === memberRoleFilter)
+                      .map((m: any) => {
+                        const activePolicy = m.policies?.find((p: any) => p.status === 'active') || m.policies?.[0];
+                        const isSuspended = m.status === 'suspended';
+                        const roleColors: Record<string, string> = {
+                          member: 'bg-teal-100 text-teal-800',
+                          admin: 'bg-purple-100 text-purple-800',
+                          staff: 'bg-blue-100 text-blue-800',
+                          provider: 'bg-emerald-100 text-emerald-800',
+                        };
+                        const roleIcons: Record<string, string> = { member: '👤', admin: '👑', staff: '💼', provider: '🏥' };
+                        return (
+                          <tr key={m.id} className="hover:bg-slate-50 transition-colors">
+                            <td className="p-4">
+                              <div className="flex items-center gap-3">
+                                <div className="h-8 w-8 rounded-full bg-[#0A1628] text-white font-mono font-bold flex items-center justify-center text-xs shrink-0">
+                                  {m.name?.[0]?.toUpperCase()}
+                                </div>
+                                <div>
+                                  <span className="font-bold text-[#0A1628] block">{m.name}</span>
+                                  <span className="text-[10px] text-gray-400 font-mono">{m.email}</span>
+                                </div>
                               </div>
-                              <div>
-                                <span className="font-bold text-[#0A1628] block">{m.name}</span>
-                                <span className="text-[10px] text-gray-400 font-mono">{m.email}</span>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="p-4 font-mono text-gray-700 font-semibold">{m.national_id || 'N/A'}</td>
-                          <td className="p-4 font-mono text-gray-500">{m.phone || 'N/A'}</td>
-                          <td className="p-4">
-                            <span className="bg-teal-50 text-[#0D9488] font-bold font-mono text-[10px] uppercase px-2 py-0.5 rounded border border-teal-100">
-                              {activePolicy?.plans?.name || 'Standard Plan'}
-                            </span>
-                          </td>
-                          <td className="p-4">
-                            <StatusBadge status={isSuspended ? 'suspended' : 'active'} />
-                          </td>
-                          <td className="p-4 text-right space-x-2">
-                            {isSuspended ? (
+                            </td>
+                            <td className="p-4">
+                              <span className={`inline-flex items-center gap-1 font-bold font-mono text-[10px] px-2 py-0.5 rounded-full ${roleColors[m.role] || 'bg-gray-100 text-gray-700'}`}>
+                                {roleIcons[m.role] || '?'} {m.role?.toUpperCase()}
+                              </span>
+                            </td>
+                            <td className="p-4">
+                              <span className="font-mono text-gray-700 block">{m.national_id || 'N/A'}</span>
+                              <span className="font-mono text-gray-400 text-[10px]">{m.phone || ''}</span>
+                            </td>
+                            <td className="p-4">
+                              {activePolicy ? (
+                                <span className="bg-teal-50 text-[#0D9488] font-bold font-mono text-[10px] uppercase px-2 py-0.5 rounded border border-teal-100">
+                                  {activePolicy?.plans?.name || 'Standard Plan'}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400 text-[10px]">—</span>
+                              )}
+                            </td>
+                            <td className="p-4">
+                              <StatusBadge status={isSuspended ? 'suspended' : 'active'} />
+                            </td>
+                            <td className="p-4 text-right space-x-2">
                               <button
-                                onClick={() => handleReinstateMember(m.id)}
-                                disabled={memberActionLoading}
-                                className="bg-teal-600 hover:bg-teal-700 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg shadow-sm cursor-pointer"
+                                onClick={() => setSelectedMember(m)}
+                                className="bg-[#0A1628] hover:bg-slate-700 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg shadow-sm cursor-pointer mr-1"
                               >
-                                Reinstate
+                                View Profile
                               </button>
-                            ) : (
-                              <button
-                                onClick={() => handleSuspendMember(m.id)}
-                                disabled={memberActionLoading}
-                                className="bg-red-500 hover:bg-red-600 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg shadow-sm cursor-pointer"
-                              >
-                                Suspend
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })
+                              {m.role === 'member' && (
+                                isSuspended ? (
+                                  <button
+                                    onClick={() => handleReinstateMember(m.id)}
+                                    disabled={memberActionLoading}
+                                    className="bg-teal-600 hover:bg-teal-700 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg shadow-sm cursor-pointer"
+                                  >Reinstate</button>
+                                ) : (
+                                  <button
+                                    onClick={() => handleSuspendMember(m.id)}
+                                    disabled={memberActionLoading}
+                                    className="bg-red-500 hover:bg-red-600 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg shadow-sm cursor-pointer"
+                                  >Suspend</button>
+                                )
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
                   )}
                 </tbody>
               </table>
             </div>
           </div>
+
+          {/* Member/User Detail Modal */}
+          {selectedMember && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+              <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between p-6 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-4">
+                    <div className="h-12 w-12 rounded-2xl bg-[#0A1628] text-white font-black text-lg flex items-center justify-center">
+                      {selectedMember.name?.[0]?.toUpperCase()}
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-black text-[#0A1628] dark:text-white">{selectedMember.name}</h3>
+                      <p className="text-xs text-gray-500 font-mono">{selectedMember.email}</p>
+                    </div>
+                    <span className={`ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      {member:'bg-teal-100 text-teal-800', admin:'bg-purple-100 text-purple-800',
+                       staff:'bg-blue-100 text-blue-800', provider:'bg-emerald-100 text-emerald-800'}[selectedMember.role as string] || 'bg-gray-100 text-gray-700'
+                    }`}>
+                      {{'member':'👤 Member','admin':'👑 Admin','staff':'💼 Staff','provider':'🏥 Provider'}[selectedMember.role as string] || selectedMember.role}
+                    </span>
+                  </div>
+                  <button onClick={() => setSelectedMember(null)} className="text-gray-400 hover:text-red-500 transition-colors cursor-pointer">
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <div className="p-6 space-y-5">
+                  {/* Personal Details */}
+                  <div>
+                    <h4 className="text-xs font-black text-gray-500 uppercase tracking-wider mb-3">Personal Information</h4>
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { label: 'Phone', value: selectedMember.phone },
+                        { label: 'National ID', value: selectedMember.national_id },
+                        { label: 'Date of Birth', value: selectedMember.dob },
+                        { label: 'Gender', value: selectedMember.gender },
+                        { label: 'Address', value: selectedMember.address },
+                        { label: 'Account Status', value: selectedMember.status },
+                        { label: 'Registered', value: selectedMember.created_at ? new Date(selectedMember.created_at).toLocaleDateString() : 'N/A' },
+                      ].map(({ label, value }) => (
+                        <div key={label} className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3">
+                          <span className="text-[10px] text-gray-400 font-mono uppercase block">{label}</span>
+                          <span className="text-xs font-bold text-[#0A1628] dark:text-white">{value || 'N/A'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Policies */}
+                  {selectedMember.policies?.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-black text-gray-500 uppercase tracking-wider mb-3">Insurance Policies</h4>
+                      <div className="space-y-2">
+                        {selectedMember.policies.map((pol: any) => (
+                          <div key={pol.id} className="bg-teal-50 border border-teal-100 rounded-xl p-4">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold font-mono text-[#0A1628] text-xs">{pol.id}</span>
+                              <StatusBadge status={pol.status} />
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 mt-2 text-[10px]">
+                              <div><span className="text-gray-400 block">Plan</span><span className="font-bold">{pol.plans?.name || 'N/A'}</span></div>
+                              <div><span className="text-gray-400 block">Coverage Limit</span><span className="font-bold">UGX {pol.coverage_limit?.toLocaleString()}</span></div>
+                              <div><span className="text-gray-400 block">Remaining</span><span className="font-bold">UGX {pol.remaining_coverage?.toLocaleString()}</span></div>
+                              <div><span className="text-gray-400 block">Start</span><span className="font-bold">{pol.start_date}</span></div>
+                              <div><span className="text-gray-400 block">Expiry</span><span className="font-bold">{pol.end_date}</span></div>
+                              <div><span className="text-gray-400 block">Premium Rate</span><span className="font-bold">UGX {pol.premium_rate?.toLocaleString()}/mo</span></div>
+                            </div>
+                            {pol.premiums?.length > 0 && (
+                              <div className="mt-2">
+                                <span className="text-[10px] text-gray-400 block mb-1">Premium Payments</span>
+                                <div className="flex flex-wrap gap-1">
+                                  {pol.premiums.map((pm: any) => (
+                                    <span key={pm.id} className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded-full ${
+                                      pm.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'
+                                    }`}>{pm.status?.toUpperCase()} — Due {pm.due_date}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

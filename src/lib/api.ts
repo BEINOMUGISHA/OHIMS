@@ -349,6 +349,33 @@ export const usersApi = {
       return null;
     });
   },
+
+  /**
+   * List ALL registered users across all roles (member, staff, admin, provider).
+   * Used by Admin & Staff dashboards for the full user registry.
+   */
+  listAllUsers: async (search?: string): Promise<ApiResponse<unknown[]>> => {
+    return safeCall(async () => {
+      let q = supabase
+        .from('profiles')
+        .select(`
+          id, name, email, role, phone, national_id, gender, address, dob, photo, created_at, status,
+          policies (
+            id, status, plan_id, coverage_limit, remaining_coverage, start_date, end_date, premium_rate,
+            plans ( name ),
+            premiums ( id, amount, status, due_date ),
+            beneficiaries ( id, name, relationship )
+          )
+        `)
+        .order('created_at', { ascending: false });
+      if (search) {
+        q = q.or(`name.ilike.%${search}%,email.ilike.%${search}%,national_id.ilike.%${search}%,role.ilike.%${search}%`);
+      }
+      const { data, error } = await q;
+      if (error) throw error;
+      return data ?? [];
+    });
+  },
 };
 
 // ── MEMBERS ────────────────────────────────────────────────────────────

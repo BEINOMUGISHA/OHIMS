@@ -64,88 +64,86 @@ export default function Navbar({
 
   return (
     <header className="bg-[#0A1628] text-white sticky top-0 z-40 shadow-md border-b border-gray-800">
-      {/* Top Banner for Instant Sandbox Role Swap (Always Visible on Mobile & Desktop) */}
+      {/* Top Banner — Demo Sandbox Accounts */}
       <div className="bg-slate-950 border-b border-slate-800/80 px-4 py-1.5 text-xs">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 text-amber-400 font-bold font-mono">
-            <RefreshCw className="h-3.5 w-3.5 animate-spin-slow" />
-            <span>Sandbox Role Quick Switch:</span>
+
+          {/* Left: Label */}
+          <div className="flex items-center gap-1.5 font-mono">
+            <RefreshCw className="h-3.5 w-3.5 text-amber-400" />
+            <span className="text-amber-400 font-bold">Demo Accounts:</span>
+            <span className="text-slate-500 text-[10px] hidden sm:inline">Quick switch for testing — or</span>
+            <button
+              type="button"
+              onClick={() => navigate('/register')}
+              className="hidden sm:inline-flex items-center gap-1 text-[#0D9488] font-bold hover:text-teal-300 transition-colors cursor-pointer"
+            >
+              <UserPlus className="h-3 w-3" />
+              <span>Register your own account →</span>
+            </button>
           </div>
 
+          {/* Right: Demo Role Buttons */}
           <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px]">
             <button
               type="button"
-              onClick={() => {
-                onLogout();
-                navigate('/');
-              }}
+              onClick={() => { onLogout(); navigate('/'); }}
               className={`px-2.5 py-1 rounded-md transition-all font-semibold cursor-pointer ${
                 currentRoleKey === 'guest'
                   ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
                   : 'bg-slate-900 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-800'
               }`}
-            >
-              🌐 Guest / Public
-            </button>
+            >🌐 Guest</button>
 
             <button
               type="button"
-              onClick={() => {
-                onUserSelected('member');
-                navigate('/dashboard');
-              }}
+              onClick={() => { onUserSelected('member'); navigate('/dashboard'); }}
               className={`px-2.5 py-1 rounded-md transition-all font-semibold cursor-pointer ${
                 currentRoleKey === 'member'
                   ? 'bg-teal-500 text-slate-950 font-bold shadow-sm'
                   : 'bg-slate-900 text-teal-400 hover:bg-teal-950/40 border border-slate-800'
               }`}
-            >
-              👤 Member (Beinomugisha)
-            </button>
+            >👤 Member</button>
 
             <button
               type="button"
-              onClick={() => {
-                onUserSelected('admin');
-                navigate('/dashboard');
-              }}
+              onClick={() => { onUserSelected('admin'); navigate('/dashboard'); }}
               className={`px-2.5 py-1 rounded-md transition-all font-semibold cursor-pointer ${
                 currentRoleKey === 'admin'
                   ? 'bg-purple-500 text-white font-bold shadow-sm'
                   : 'bg-slate-900 text-purple-400 hover:bg-purple-950/40 border border-slate-800'
               }`}
-            >
-              👑 Admin
-            </button>
+            >👑 Admin</button>
 
             <button
               type="button"
-              onClick={() => {
-                onUserSelected('staff');
-                navigate('/dashboard');
-              }}
+              onClick={() => { onUserSelected('staff'); navigate('/dashboard'); }}
               className={`px-2.5 py-1 rounded-md transition-all font-semibold cursor-pointer ${
                 currentRoleKey === 'staff'
                   ? 'bg-blue-500 text-white font-bold shadow-sm'
                   : 'bg-slate-900 text-blue-400 hover:bg-blue-950/40 border border-slate-800'
               }`}
-            >
-              💼 Staff
-            </button>
+            >💼 Staff</button>
 
             <button
               type="button"
-              onClick={() => {
-                onUserSelected('provider');
-                navigate('/dashboard');
-              }}
+              onClick={() => { onUserSelected('provider'); navigate('/dashboard'); }}
               className={`px-2.5 py-1 rounded-md transition-all font-semibold cursor-pointer ${
                 currentRoleKey === 'provider'
                   ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
                   : 'bg-slate-900 text-emerald-400 hover:bg-emerald-950/40 border border-slate-800'
               }`}
+            >🏥 Clinic</button>
+
+            {/* Divider + Personal Account Button */}
+            <span className="text-slate-700 px-1">|</span>
+            <button
+              type="button"
+              onClick={() => navigate('/register')}
+              className="px-2.5 py-1 rounded-md bg-[#0D9488] text-white font-bold hover:bg-teal-600 transition-all cursor-pointer flex items-center gap-1"
             >
-              🏥 Clinic (Mulago)
+              <UserPlus className="h-3 w-3" />
+              Your Own Account
             </button>
           </div>
         </div>

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OHIMS Uganda — Online Health Insurance Management System</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <script>
+      // 1. Purge all Service Worker registrations
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then((registrations) => {
+          for (const registration of registrations) {
+            registration.unregister();
+          }
+        });
+      }
+      // 2. Clear CacheStorage API caches from previous builds
+      if ('caches' in window) {
+        caches.keys().then((names) => {
+          for (const name of names) {
+            caches.delete(name);
+          }
+        });
+      }
+    </script>
+    <script type="module" crossorigin src="./assets/index-XERuBOX0.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-CAmd5meg.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
+

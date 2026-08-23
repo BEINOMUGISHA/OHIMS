@@ -12,6 +12,23 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    build: {
+      target: 'esnext',
+      minify: 'esbuild',
+      cssCodeSplit: true,
+      chunkSizeWarningLimit: 1000,
+      rollupOptions: {
+        output: {
+          manualChunks: (id) => {
+            if (id.includes('node_modules/three')) return 'vendor-three';
+            if (id.includes('node_modules/@supabase')) return 'vendor-supabase';
+            if (id.includes('node_modules/lucide-react')) return 'vendor-lucide';
+            if (id.includes('node_modules/jspdf') || id.includes('node_modules/html2canvas') || id.includes('node_modules/dompurify')) return 'vendor-docs';
+            if (id.includes('node_modules/recharts')) return 'vendor-charts';
+          },
+        },
+      },
+    },
     server: {
       proxy: {
         '/api': {

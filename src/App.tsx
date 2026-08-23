@@ -2,20 +2,15 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * OHIMS Uganda — App Root with Page-Based Routing (v2)
+ * OHIMS Uganda — App Root with Page-Based Routing (v3 Instant Load)
  * Configured with HashRouter for zero-config GitHub Pages sub-route support.
- * Wraps entire app in ToastProvider for global notifications.
- * Session watcher is integrated via useSession (inside Router context).
+ * Code-split routes & non-blocking concurrent initialization for instant page load.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import LandingPage from './pages/LandingPage';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import ForgotPassword from './pages/ForgotPassword';
-import DashboardPage from './pages/DashboardPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import ToastContainer from './components/ui/Toast';
 import { ToastProvider, useToast } from './hooks/useToast';
@@ -30,7 +25,11 @@ import {
   authApi,
 } from './lib/api';
 
-// ── Session-aware inner app (must be inside <Router>) ──────────────────
+// Code-split heavy routes for instant initial download
+const Login = lazy(() => import('./pages/Login'));
+const Register = lazy(() => import('./pages/Register'));
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 
 function AppInner() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -67,7 +66,7 @@ function AppInner() {
     setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
   };
 
-  // Load general platform lookup values
+  // Load general platform lookup values in background
   const loadPlatformData = async () => {
     try {
       const [plansResult, usersResult] = await Promise.all([
@@ -103,7 +102,7 @@ function AppInner() {
     setLoading(false);
   };
 
-  // Handle sandbox user switcher
+  // Handle user swap
   const handleUserSwap = async (accountKey: string) => {
     setLoading(true);
     try {
@@ -164,13 +163,19 @@ function AppInner() {
     }
   };
 
-  // Bootstrap on load — check Supabase session
+  // Bootstrap on load — non-blocking concurrent initialization for INSTANT initial render
   useEffect(() => {
     const initApp = async () => {
-      setLoading(true);
-      await loadPlatformData();
-      await restoreSession();
+      // Parallelize restoreSession and platform data loading
+      const sessionPromise = restoreSession();
+      const platformPromise = loadPlatformData();
+      
+      // Unblock UI immediately after session check resolves
+      await sessionPromise;
       setLoading(false);
+
+      // Finish platform data in background
+      await platformPromise;
     };
 
     initApp();
@@ -206,7 +211,6 @@ function AppInner() {
           filter: `user_id=eq.${currentUser.id}`,
         },
         (payload) => {
-          // Push new notification into state + show toast
           const n = payload.new as Notification;
           setNotifications((prev) => [n, ...prev.slice(0, 49)]);
           showToast(n.message, n.type === 'alert' ? 'warning' : n.type as any);
@@ -221,7 +225,7 @@ function AppInner() {
     return (
       <div className="min-h-screen bg-[#0A1628] flex flex-col items-center justify-center text-white p-6 font-mono">
         <div className="flex items-center space-x-3 mb-6">
-          <div className="bg-[#0D9488] p-2.5 rounded-xl text-white">
+          <div className="bg-[#0D9488] p-2.5 rounded-xl text-white shadow-lg shadow-teal-500/40">
             <ShieldCheck className="h-8 w-8 animate-pulse text-white" />
           </div>
           <div>
@@ -231,7 +235,7 @@ function AppInner() {
         </div>
         <div className="flex items-center space-x-2 text-xs text-gray-400">
           <RefreshCw className="h-4 w-4 animate-spin text-[#0D9488]" />
-          <span>Synchronizing baseline registry datasets &amp; policyholder sessions...</span>
+          <span>Synchronizing coverage registry &amp; sessions...</span>
         </div>
       </div>
     );
@@ -252,50 +256,51 @@ function AppInner() {
       />
 
       <main className="flex-1 pb-16">
-        <Routes>
-          <Route path="/" element={<LandingPage plans={plans} />} />
+        <Suspense fallback={
+          <div className="min-h-[70vh] flex items-center justify-center p-6">
+            <div className="flex items-center space-x-3 text-xs text-gray-400 font-mono">
+              <RefreshCw className="h-5 w-5 animate-spin text-[#0D9488]" />
+              <span>Loading page bundle...</span>
+            </div>
+          </div>
+        }>
+          <Routes>
+            <Route path="/" element={<LandingPage plans={plans} />} />
 
-          <Route
-            path="/login"
-            element={
-              currentUser ? <Navigate to="/dashboard" replace /> : <Login onLoginSuccess={handleLoginSuccess} />
-            }
-          />
+            <Route
+              path="/login"
+              element={
+                currentUser ? <Navigate to="/dashboard" replace /> : <Login onLoginSuccess={handleLoginSuccess} />
+              }
+            />
 
-          <Route
-            path="/register"
-            element={
-              currentUser ? <Navigate to="/dashboard" replace /> : <Register plans={plans} onLoginSuccess={handleLoginSuccess} />
-            }
-          />
+            <Route
+              path="/register"
+              element={
+                currentUser ? <Navigate to="/dashboard" replace /> : <Register plans={plans} onLoginSuccess={handleLoginSuccess} />
+              }
+            />
 
-          <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
 
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute currentUser={currentUser}>
-                <DashboardPage
-                  currentUser={currentUser!}
-                  onRefreshData={handleRefreshAllData}
-                  theme={theme}
-                />
-              </ProtectedRoute>
-            }
-          />
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute currentUser={currentUser}>
+                  <DashboardPage currentUser={currentUser!} onRefreshData={handleRefreshAllData} theme={theme} />
+                </ProtectedRoute>
+              }
+            />
 
-          {/* Fallback route */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </main>
 
-      {/* Global toast overlay */}
       <ToastContainer />
     </div>
   );
 }
-
-// ── Root export — wraps in providers ──────────────────────────────────
 
 export default function App() {
   return (

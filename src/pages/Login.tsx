@@ -2,14 +2,14 @@
  * src/pages/Login.tsx
  * OHIMS Uganda — Role-Based Secure Authentication Portal
  * Every role (Member, Staff, Clinic Provider, Admin) has an isolated, role-verifying login page.
- * Prevents account forgery & cross-role access impersonation.
+ * Hardened UI with vibrant glowing accents & classic glassmorphism.
  */
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import {
   Shield, Lock, Mail, ArrowRight, AlertCircle, RefreshCw, KeyRound,
-  UserCheck, Building2, Briefcase, Crown, ShieldAlert
+  UserCheck, Building2, Briefcase, Crown, ShieldAlert, Sparkles
 } from 'lucide-react';
 import { authApi } from '../lib/api';
 
@@ -131,23 +131,23 @@ export default function Login({ onLoginSuccess }: LoginPageProps) {
 
   return (
     <div className="min-h-[85vh] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-slate-50 dark:bg-slate-950 transition-colors">
-      <div className="max-w-xl w-full space-y-6 bg-white dark:bg-slate-900 p-8 rounded-3xl shadow-xl border border-slate-200 dark:border-slate-800">
+      <div className="max-w-xl w-full space-y-6 bg-white/95 dark:bg-slate-900/90 backdrop-blur-xl p-8 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800/80">
         
         {/* Portal Header Branding */}
         <div className="text-center">
-          <div className="inline-flex items-center justify-center p-3 bg-[#0D9488]/10 text-[#0D9488] rounded-2xl mb-3">
+          <div className="inline-flex items-center justify-center p-3.5 bg-gradient-to-br from-[#0D9488] via-[#06B6D4] to-[#10B981] text-white rounded-2xl mb-3 shadow-lg shadow-teal-500/30">
             <Shield className="h-9 w-9" />
           </div>
-          <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-            OHIMS Uganda Portal Sign In
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+            OHIMS Portal Sign In
           </h2>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
             Secure, role-verified authentication for all national health coverage stakeholders
           </p>
         </div>
 
-        {/* Role Portal Selector Tabs */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-1.5 bg-slate-100 dark:bg-slate-800 rounded-2xl">
+        {/* Role Portal Selector Tabs with Glowing Indicators */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-1.5 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/60">
           {ROLE_PORTALS.map((portal) => {
             const isActive = activeRole === portal.key;
             return (
@@ -155,10 +155,10 @@ export default function Login({ onLoginSuccess }: LoginPageProps) {
                 key={portal.key}
                 type="button"
                 onClick={() => handleRoleTabChange(portal.key)}
-                className={`py-2 px-2 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${
+                className={`py-2.5 px-2 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${
                   isActive
-                    ? 'bg-white dark:bg-slate-900 text-[#0D9488] dark:text-teal-400 shadow-md font-extrabold border border-teal-500/20'
-                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    ? 'bg-gradient-to-b from-white to-teal-50/50 dark:from-slate-900 dark:to-teal-950/40 text-[#0D9488] dark:text-teal-300 shadow-md shadow-teal-500/20 font-extrabold border border-teal-400/50 scale-[1.02]'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-slate-700/50'
                 }`}
               >
                 <span className="text-base">{portal.icon}</span>
@@ -169,18 +169,21 @@ export default function Login({ onLoginSuccess }: LoginPageProps) {
         </div>
 
         {/* Selected Portal Banner */}
-        <div className="p-4 rounded-2xl bg-teal-50/50 dark:bg-teal-950/20 border border-teal-100 dark:border-teal-900/40 flex items-start justify-between gap-3">
+        <div className="p-4 rounded-2xl bg-teal-50/60 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800/60 flex items-start justify-between gap-3 shadow-inner">
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xl">{currentPortal.icon}</span>
-              <h3 className="font-extrabold text-sm text-[#0A1628] dark:text-white">{currentPortal.label} Portal</h3>
+              <h3 className="font-extrabold text-sm text-[#0A1628] dark:text-white flex items-center gap-1.5">
+                {currentPortal.label} Portal
+                <Sparkles className="h-3 w-3 text-teal-400 animate-pulse" />
+              </h3>
             </div>
-            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">{currentPortal.subtitle}</p>
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">{currentPortal.subtitle}</p>
           </div>
           <button
             type="button"
             onClick={handleQuickFillDemo}
-            className="shrink-0 text-[10px] font-mono font-bold bg-[#0D9488]/10 hover:bg-[#0D9488]/20 text-[#0D9488] border border-[#0D9488]/30 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+            className="shrink-0 text-[10px] font-mono font-bold bg-[#0D9488] hover:bg-[#0b7e74] text-white shadow-md shadow-teal-500/20 px-3 py-1.5 rounded-xl transition-all hover:scale-105 cursor-pointer"
           >
             Fill Demo Credentials
           </button>
@@ -188,7 +191,7 @@ export default function Login({ onLoginSuccess }: LoginPageProps) {
 
         {/* Error Alert */}
         {error && (
-          <div className="bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 p-4 rounded-2xl flex items-start gap-3 text-xs text-rose-700 dark:text-rose-300">
+          <div className="bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/80 p-4 rounded-2xl flex items-start gap-3 text-xs text-rose-700 dark:text-rose-300 shadow-sm">
             <ShieldAlert className="h-5 w-5 shrink-0 text-rose-500 mt-0.5" />
             <div className="flex-1 font-medium leading-relaxed">{error}</div>
           </div>
@@ -201,14 +204,14 @@ export default function Login({ onLoginSuccess }: LoginPageProps) {
               Registered Email Address ({currentPortal.badge})
             </label>
             <div className="relative">
-              <Mail className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <Mail className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
               <input
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder={`${currentPortal.key}@ohims.gov.ug`}
-                className="w-full pl-9 pr-3 py-2.5 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-[#0D9488] outline-none transition-colors"
+                className="w-full pl-9 pr-3 py-2.5 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-[#0D9488] outline-none transition-all"
               />
             </div>
           </div>
@@ -223,14 +226,14 @@ export default function Login({ onLoginSuccess }: LoginPageProps) {
               </Link>
             </div>
             <div className="relative">
-              <Lock className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <Lock className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
               <input
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••••••"
-                className="w-full pl-9 pr-3 py-2.5 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-[#0D9488] outline-none transition-colors"
+                className="w-full pl-9 pr-3 py-2.5 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-[#0D9488] outline-none transition-all"
               />
             </div>
           </div>
@@ -238,7 +241,7 @@ export default function Login({ onLoginSuccess }: LoginPageProps) {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-[#0D9488] hover:bg-[#0b7e74] text-white font-bold py-3 px-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-md shadow-teal-500/10 cursor-pointer disabled:opacity-50"
+            className="w-full bg-gradient-to-r from-[#0D9488] via-[#06B6D4] to-[#10B981] hover:shadow-xl hover:shadow-teal-500/40 text-white font-extrabold py-3 px-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-teal-500/30 border border-teal-300/30 cursor-pointer disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99]"
           >
             {loading ? (
               <>

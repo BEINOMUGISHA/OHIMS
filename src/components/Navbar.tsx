@@ -1,6 +1,9 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * Navbar — Intuitive, Classic & Vibrant UI with Glowing Navigation Buttons,
+ * Glassmorphic Header, and Quick Role Portal Links.
  */
 
 import React, { useState } from 'react';
@@ -12,11 +15,13 @@ import {
   AlertTriangle,
   Info,
   LogOut,
-  RefreshCw,
   Clock,
   Sun,
   Moon,
-  UserPlus
+  UserPlus,
+  ArrowRight,
+  Sparkles,
+  ChevronRight
 } from 'lucide-react';
 import { User, Notification } from '../types';
 
@@ -52,47 +57,69 @@ export default function Navbar({
     navigate('/login');
   };
 
-  const currentRoleKey = currentUser
-    ? currentUser.role === 'admin'
-      ? 'admin'
-      : currentUser.role === 'staff'
-      ? 'staff'
-      : currentUser.role === 'provider'
-      ? 'provider'
-      : 'member'
-    : 'guest';
-
   return (
-    <header className="bg-[#0A1628] text-white sticky top-0 z-40 shadow-md border-b border-gray-800">
+    <header className="bg-[#0A1628]/95 backdrop-blur-xl text-white sticky top-0 z-40 border-b border-teal-500/20 shadow-[0_4px_30px_rgba(13,148,136,0.15)] transition-all">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
+        <div className="flex items-center justify-between h-16 sm:h-20">
           
           {/* Logo & Platform Name */}
           <Link
             to={currentUser ? "/dashboard" : "/"}
             className="flex items-center space-x-3 cursor-pointer group"
           >
-            <div className="bg-[#0D9488] p-2 rounded-lg text-white group-hover:bg-[#0b7e74] transition-all">
+            <div className="bg-gradient-to-br from-[#0D9488] via-[#06B6D4] to-[#10B981] p-2.5 rounded-xl text-white shadow-lg shadow-teal-500/40 group-hover:shadow-teal-400/70 group-hover:scale-105 transition-all">
               <Shield className="h-6 w-6" />
             </div>
             <div>
-              <span className="font-extrabold tracking-tight text-white block text-sm sm:text-base">
+              <span className="font-extrabold tracking-tight text-white block text-sm sm:text-base group-hover:text-teal-200 transition-colors">
                 Online Health Insurance Management System (OHIMS)
               </span>
-              <span className="text-[10px] text-teal-400 font-mono uppercase tracking-wider block font-bold">
-                Uganda Coverage Hub
+              <span className="text-[10px] text-teal-300 font-mono uppercase tracking-wider flex items-center gap-1 font-bold">
+                <Sparkles className="h-2.5 w-2.5 text-teal-400 animate-pulse" />
+                Uganda National Coverage Hub
               </span>
             </div>
           </Link>
 
-          {/* Main User Actions & Notification Panel Component */}
+          {/* Center: Glowing Role Portal Direct Nav Links (when guest) */}
+          {!currentUser && (
+            <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-slate-900/80 border border-teal-500/20 backdrop-blur-md shadow-inner">
+              <span className="text-[10px] text-teal-400 font-mono uppercase tracking-wider font-extrabold px-1">Portals:</span>
+              <Link
+                to="/login?role=member"
+                className="px-2.5 py-1 rounded-xl text-[11px] font-bold text-teal-300 bg-teal-950/40 border border-teal-500/30 hover:bg-[#0D9488] hover:text-white hover:border-teal-300 shadow-sm hover:shadow-md hover:shadow-teal-500/40 transition-all transform hover:-translate-y-0.5"
+              >
+                👤 Member
+              </Link>
+              <Link
+                to="/login?role=staff"
+                className="px-2.5 py-1 rounded-xl text-[11px] font-bold text-cyan-300 bg-cyan-950/40 border border-cyan-500/30 hover:bg-cyan-600 hover:text-white hover:border-cyan-300 shadow-sm hover:shadow-md hover:shadow-cyan-500/40 transition-all transform hover:-translate-y-0.5"
+              >
+                💼 Staff
+              </Link>
+              <Link
+                to="/login?role=provider"
+                className="px-2.5 py-1 rounded-xl text-[11px] font-bold text-emerald-300 bg-emerald-950/40 border border-emerald-500/30 hover:bg-emerald-600 hover:text-white hover:border-emerald-300 shadow-sm hover:shadow-md hover:shadow-emerald-500/40 transition-all transform hover:-translate-y-0.5"
+              >
+                🏥 Clinic
+              </Link>
+              <Link
+                to="/login?role=admin"
+                className="px-2.5 py-1 rounded-xl text-[11px] font-bold text-purple-300 bg-purple-950/40 border border-purple-500/30 hover:bg-purple-600 hover:text-white hover:border-purple-300 shadow-sm hover:shadow-md hover:shadow-purple-500/40 transition-all transform hover:-translate-y-0.5"
+              >
+                👑 Admin
+              </Link>
+            </div>
+          )}
+
+          {/* Right: Actions, Notifications, User Avatar */}
           <div className="flex items-center space-x-3 sm:space-x-4">
             
             {/* Global Theme Toggle Button */}
             <button
               onClick={onToggleTheme}
               id="theme-toggle-btn"
-              className="p-2 text-gray-300 hover:text-amber-400 dark:hover:text-amber-300 hover:bg-gray-800 rounded-full transition-colors font-mono cursor-pointer"
+              className="p-2 text-teal-300 hover:text-white bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/60 hover:border-teal-400 rounded-xl transition-all shadow-sm hover:shadow-md hover:shadow-teal-500/30 font-mono cursor-pointer"
               title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
             >
               {theme === 'dark' ? (
@@ -108,43 +135,46 @@ export default function Navbar({
                 <button
                   id="navbar-notification-btn"
                   onClick={() => setShowNotificationDropdown(!showNotificationDropdown)}
-                  className="p-2 text-gray-300 hover:text-white hover:bg-gray-800 rounded-full transition-colors relative cursor-pointer"
+                  className="p-2 text-teal-300 hover:text-white bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/60 hover:border-teal-400 rounded-xl transition-all shadow-sm hover:shadow-md hover:shadow-teal-500/30 relative cursor-pointer"
                 >
                   <Bell className="h-5 w-5" />
                   {unreadCount > 0 && (
-                    <span className="absolute top-1.5 right-1.5 bg-[#0D9488] text-[9px] text-white font-black h-4 w-4 rounded-full flex items-center justify-center animate-pulse">
+                    <span className="absolute -top-1 -right-1 bg-gradient-to-r from-teal-500 to-emerald-400 text-[10px] text-white font-black h-4 w-4 rounded-full flex items-center justify-center shadow-lg shadow-teal-500/50 animate-pulse">
                       {unreadCount}
                     </span>
                   )}
                 </button>
 
                 {showNotificationDropdown && (
-                  <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-slate-900 text-gray-900 dark:text-white rounded-xl shadow-2xl border border-gray-100 dark:border-slate-800 py-2 z-50 animate-fade-in-down">
+                  <div className="absolute right-0 mt-3 w-80 sm:w-96 bg-white dark:bg-slate-900 text-gray-900 dark:text-white rounded-2xl shadow-2xl border border-teal-500/30 py-3 z-50 animate-fade-in-down backdrop-blur-xl">
                     <div className="px-4 py-2 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between">
-                      <span className="font-bold text-sm text-gray-900 dark:text-white">Notifications ({unreadCount} unread)</span>
+                      <span className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-1.5">
+                        <Bell className="h-4 w-4 text-[#0D9488]" />
+                        Notifications ({unreadCount} unread)
+                      </span>
                       {notifications.length > 0 && (
                         <button
                           onClick={() => {
                             onClearAllNotifications();
                             setShowNotificationDropdown(false);
                           }}
-                          className="text-xs text-[#0D9488] hover:underline font-semibold cursor-pointer"
+                          className="text-xs text-[#0D9488] hover:underline font-bold cursor-pointer"
                         >
                           Mark all read
                         </button>
                       )}
                     </div>
 
-                    <div className="max-h-72 overflow-y-auto">
+                    <div className="max-h-80 overflow-y-auto">
                       {notifications.length === 0 ? (
-                        <div className="py-8 px-4 text-center text-sm text-gray-400">
+                        <div className="py-8 px-4 text-center text-xs text-gray-400 font-mono">
                           No current notifications.
                         </div>
                       ) : (
                         notifications.map((not) => (
                           <div
                             key={not.id}
-                            className={`px-4 py-3 border-b border-gray-50 dark:border-slate-800 flex items-start space-x-3 transition-colors ${not.read ? 'opacity-60 bg-white dark:bg-slate-900' : 'bg-teal-50/40 dark:bg-teal-950/20'}`}
+                            className={`px-4 py-3 border-b border-gray-50 dark:border-slate-800 flex items-start space-x-3 transition-colors ${not.read ? 'opacity-60 bg-white dark:bg-slate-900' : 'bg-teal-50/50 dark:bg-teal-950/30'}`}
                           >
                             <div className="mt-0.5">
                               {not.type === 'success' ? (
@@ -157,7 +187,7 @@ export default function Navbar({
                             </div>
                             <div className="flex-1">
                               <p className="text-xs font-medium text-gray-800 dark:text-gray-200 leading-relaxed">{not.message}</p>
-                              <div className="flex items-center space-x-1 mt-1 text-[9px] text-gray-400">
+                              <div className="flex items-center space-x-1 mt-1 text-[9px] text-gray-400 font-mono">
                                 <Clock className="h-2.5 w-2.5" />
                                 <span>{new Date(not.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                               </div>
@@ -179,42 +209,43 @@ export default function Navbar({
               </div>
             )}
 
-            {/* Profile Avatar & Navigation Links */}
+            {/* User Profile or Glowing Action Buttons */}
             {currentUser ? (
-              <div className="flex items-center space-x-3 pl-2 border-l border-gray-800">
+              <div className="flex items-center space-x-3 pl-3 border-l border-slate-800">
                 <div className="hidden lg:block text-right">
-                  <span className="text-xs font-semibold text-white block">{currentUser.name}</span>
-                  <span className="text-[10px] font-bold text-[#0D9488] bg-[#0d9488]/10 px-1.5 py-0.5 rounded-md uppercase font-sans tracking-wide">
+                  <span className="text-xs font-bold text-white block">{currentUser.name}</span>
+                  <span className="text-[10px] font-extrabold text-teal-300 bg-teal-950/60 border border-teal-500/30 px-2 py-0.5 rounded-md uppercase tracking-wider font-mono">
                     {currentUser.role}
                   </span>
                 </div>
-                <div className="h-9 w-9 bg-teal-800 border-2 border-teal-500 text-white rounded-full flex items-center justify-center font-bold font-mono">
+                <div className="h-9 w-9 bg-gradient-to-br from-[#0D9488] to-[#06B6D4] text-white rounded-xl flex items-center justify-center font-black font-mono text-sm shadow-md shadow-teal-500/30 ring-2 ring-teal-400/40">
                   {currentUser.name.split(' ').map(n=>n[0]).join('')}
                 </div>
                 <button
                   id="navbar-logout-btn"
                   onClick={handleLogoutClick}
-                  className="p-2 text-gray-400 hover:text-red-400 hover:bg-gray-800 rounded-full transition-colors cursor-pointer"
+                  className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800/80 rounded-xl transition-all cursor-pointer"
                   title="Logout"
                 >
-                  <LogOut className="h-4 w-4" />
+                  <LogOut className="h-4.5 w-4.5" />
                 </button>
               </div>
             ) : (
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-2.5">
                 <Link
                   to="/register"
-                  className="hidden sm:inline-flex items-center gap-1 text-xs text-slate-300 hover:text-white font-medium px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors"
+                  className="hidden sm:inline-flex items-center gap-1.5 text-xs text-teal-300 border border-teal-500/40 bg-teal-950/40 hover:bg-teal-500/20 hover:border-teal-300 shadow-md shadow-teal-500/20 font-bold px-4 py-2.5 rounded-xl transition-all hover:scale-[1.02]"
                 >
-                  <UserPlus className="h-3.5 w-3.5 text-[#0D9488]" />
+                  <UserPlus className="h-4 w-4 text-teal-400" />
                   <span>Register</span>
                 </Link>
                 <Link
                   to="/login"
                   id="navbar-login-btn"
-                  className="bg-[#0D9488] hover:bg-[#0b7e74] text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition-all"
+                  className="bg-gradient-to-r from-[#0D9488] via-[#06B6D4] to-[#10B981] text-white font-extrabold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-teal-500/40 hover:shadow-teal-400/70 hover:scale-[1.03] active:scale-[0.98] transition-all border border-teal-300/30 flex items-center gap-1.5"
                 >
-                  Sign In
+                  <span>Sign In</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
                 </Link>
               </div>
             )}

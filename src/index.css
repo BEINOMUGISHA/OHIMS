@@ -25,6 +25,62 @@ body {
   padding-right: env(safe-area-inset-right);
 }
 
+/* Custom Glowing UI Effects & Classic Vibrant Accents */
+.glow-btn-teal {
+  box-shadow: 0 0 20px rgba(13, 148, 136, 0.45), 0 0 40px rgba(6, 182, 212, 0.25);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glow-btn-teal:hover {
+  box-shadow: 0 0 30px rgba(13, 148, 136, 0.75), 0 0 60px rgba(6, 182, 212, 0.45);
+  transform: translateY(-1px) scale(1.02);
+}
+
+.glow-btn-teal-primary {
+  box-shadow: 0 0 15px rgba(13, 148, 136, 0.4);
+}
+
+.glow-btn-teal-primary:hover {
+  box-shadow: 0 0 25px rgba(13, 148, 136, 0.7);
+}
+
+.glow-nav-pill {
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.glow-nav-pill::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(13, 148, 136, 0.6), rgba(6, 182, 212, 0.6), rgba(16, 185, 129, 0.6));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.6;
+  transition: opacity 0.3s ease;
+}
+
+.glow-nav-pill:hover::after {
+  opacity: 1;
+}
+
+@keyframes ambientPulse {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(13, 148, 136, 0.3), 0 0 30px rgba(6, 182, 212, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(13, 148, 136, 0.6), 0 0 50px rgba(6, 182, 212, 0.4);
+  }
+}
+
+.animate-glow-pulse {
+  animation: ambientPulse 3s infinite ease-in-out;
+}
+
 /* Momentum scrolling for iOS WebKit */
 .overflow-y-auto,
 .overflow-x-auto,
@@ -43,12 +99,13 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.3);
+  background: rgba(13, 148, 136, 0.4);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(13, 148, 136, 0.6);
+  background: rgba(13, 148, 136, 0.8);
+  box-shadow: 0 0 10px rgba(13, 148, 136, 0.8);
 }
 
 /* Smooth transition for theme switches */
@@ -157,7 +214,7 @@ html.dark body {
 .dark select:focus,
 .dark textarea:focus {
   border-color: #0d9488 !important; /* Teal accent */
-  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.2);
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.4);
 }
 
 .dark input::placeholder,

@@ -156,20 +156,24 @@ function MemberDashboardInner({ currentUser, onRefreshData }: MemberDashboardPro
       // Fetch full member profile with nested policies, premiums, beneficiaries
       const details = await membersApi.get(currentUser.id);
       const profile = details || {};
-      const policies = profile.policies || [];
+      const rawPolicies = profile.policies || [];
+      const policies = Array.isArray(rawPolicies) ? rawPolicies : [];
       const activePolicy = policies[0] || null;
 
       let claimsList: any[] = [];
       if (activePolicy?.id) {
         try {
-          claimsList = await claimsApi.list({ policy_id: activePolicy.id });
+          const claimsRes = await claimsApi.list({ policy_id: activePolicy.id });
+          claimsList = (claimsRes as any)?.data ?? (Array.isArray(claimsRes) ? claimsRes : []);
         } catch (e) {
           console.warn('Failed to fetch claims for policy:', e);
         }
       }
 
-      const premiumsList = activePolicy?.premiums || [];
-      const beneficiariesList = activePolicy?.beneficiaries || [];
+      const rawPremiums = activePolicy?.premiums || [];
+      const rawBeneficiaries = activePolicy?.beneficiaries || [];
+      const premiumsList = Array.isArray(rawPremiums) ? rawPremiums : [];
+      const beneficiariesList = Array.isArray(rawBeneficiaries) ? rawBeneficiaries : [];
 
       const normalizedData = {
         member: {
@@ -190,9 +194,9 @@ function MemberDashboardInner({ currentUser, onRefreshData }: MemberDashboardPro
           } : null,
         },
         policies: policies,
-        claims: claimsList || [],
-        premiums: premiumsList || [],
-        beneficiaries: beneficiariesList || [],
+        claims: Array.isArray(claimsList) ? claimsList : [],
+        premiums: premiumsList,
+        beneficiaries: beneficiariesList,
       };
 
       setMemberData(normalizedData);
@@ -214,7 +218,8 @@ function MemberDashboardInner({ currentUser, onRefreshData }: MemberDashboardPro
 
       // Fetch providers for Clinic Finder
       const provData = await providersApi.list();
-      setProviders((provData as unknown as Provider[]) ?? []);
+      const provList = (provData as any)?.data ?? (Array.isArray(provData) ? provData : []);
+      setProviders((provList as unknown as Provider[]) ?? []);
     } catch (e) {
       console.error('Error fetching member stats', e);
     } finally {
@@ -592,9 +597,10 @@ function MemberDashboardInner({ currentUser, onRefreshData }: MemberDashboardPro
     const planLimit = activePolicy?.plan_limit || 5000000;
     
     // Calculate spent claims
-    const spentClaims = memberData?.claims
-      ? memberData.claims.filter((c: Claim) => c.status === 'paid').reduce((sum: number, c: Claim) => sum + c.amount_approved, 0)
-      : 0;
+    const claimsArr = Array.isArray(memberData?.claims) ? memberData.claims : [];
+    const spentClaims = claimsArr
+      .filter((c: Claim) => c.status === 'paid')
+      .reduce((sum: number, c: Claim) => sum + (c.amount_approved || 0), 0);
     const remainingLimit = planLimit - spentClaims;
 
     let verdict = 'COVERED';
@@ -1764,19 +1770,19 @@ function MemberDashboardInner({ currentUser, onRefreshData }: MemberDashboardPro
                 <div className="p-3 bg-white rounded-xl border border-slate-100 flex flex-col">
                   <span className="text-[10px] text-gray-400 uppercase">Paid Claims</span>
                   <span className="text-sm font-black text-emerald-700 mt-1">
-                    UGX {memberData.claims.filter((c: Claim) => c.status === 'paid').reduce((sum: number, c: Claim) => sum + c.amount_approved, 0).toLocaleString()}
+                    UGX {claims.filter((c: Claim) => c.status === 'paid').reduce((sum: number, c: Claim) => sum + (c.amount_approved || 0), 0).toLocaleString()}
                   </span>
                 </div>
                 <div className="p-3 bg-white rounded-xl border border-slate-100 flex flex-col">
                   <span className="text-[10px] text-gray-400 uppercase">Claims evaluation</span>
                   <span className="text-sm font-black text-amber-700 mt-1">
-                    {memberData.claims.filter((c: Claim) => c.status === 'submitted' || c.status === 'under_review').length} Pending
+                    {claims.filter((c: Claim) => c.status === 'submitted' || c.status === 'under_review').length} Pending
                   </span>
                 </div>
                 <div className="p-3 bg-white rounded-xl border border-slate-100 flex flex-col">
                   <span className="text-[10px] text-gray-400 uppercase">Premiums Status</span>
                   <span className="text-sm font-black text-[#0D9488] mt-1">
-                    {memberData.premiums.filter((p: Premium) => p.status === 'paid').length} payments
+                    {premiums.filter((p: Premium) => p.status === 'paid').length} payments
                   </span>
                 </div>
               </div>

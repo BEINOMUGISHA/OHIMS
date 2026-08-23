@@ -468,23 +468,35 @@ function ProviderDashboardInner({ currentUser, onRefreshData }: ProviderDashboar
         </div>
       )}
 
-      {/* Nav Tabs */}
-      <div className="flex border-b border-gray-200 dark:border-slate-700 overflow-x-auto scrollbar-thin whitespace-nowrap">
+      {/* Nav Tabs — High Visibility Glowing Pills */}
+      <div className="flex items-center gap-2 border-b border-gray-200 dark:border-slate-800 pb-3.5 overflow-x-auto scrollbar-thin whitespace-nowrap pt-1">
         <button
           onClick={() => setActiveTab('claims')}
-          className={`py-3 px-4 font-bold text-xs border-b-2 transition-colors flex-shrink-0 cursor-pointer ${activeTab === 'claims' ? 'border-[#0D9488] text-[#0D9488]' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+          className={`py-2.5 px-4 font-extrabold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+            activeTab === 'claims'
+              ? 'bg-gradient-to-r from-[#0D9488] via-[#06B6D4] to-[#10B981] text-white shadow-lg shadow-teal-500/40 border border-teal-300/40 scale-[1.03]'
+              : 'bg-white dark:bg-slate-800/90 text-slate-800 dark:text-slate-100 hover:text-teal-600 dark:hover:text-teal-300 border border-slate-200 dark:border-slate-700 hover:border-teal-400 hover:shadow-md hover:shadow-teal-500/20'
+          }`}
         >
-          Clinical Claims Queue ({providerClaims.length})
+          📑 Clinical Claims Queue ({providerClaims.length})
         </button>
         <button
           onClick={() => setActiveTab('clients')}
-          className={`py-3 px-4 font-bold text-xs border-b-2 transition-colors flex-shrink-0 cursor-pointer ${activeTab === 'clients' ? 'border-[#0D9488] text-[#0D9488]' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+          className={`py-2.5 px-4 font-extrabold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+            activeTab === 'clients'
+              ? 'bg-gradient-to-r from-[#0D9488] via-[#06B6D4] to-[#10B981] text-white shadow-lg shadow-teal-500/40 border border-teal-300/40 scale-[1.03]'
+              : 'bg-white dark:bg-slate-800/90 text-slate-800 dark:text-slate-100 hover:text-teal-600 dark:hover:text-teal-300 border border-slate-200 dark:border-slate-700 hover:border-teal-400 hover:shadow-md hover:shadow-teal-500/20'
+          }`}
         >
           👥 Registered Clients &amp; Patient Roster ({patients.length})
         </button>
         <button
           onClick={() => setActiveTab('eligibility')}
-          className={`py-3 px-4 font-bold text-xs border-b-2 transition-colors flex-shrink-0 cursor-pointer ${activeTab === 'eligibility' ? 'border-[#0D9488] text-[#0D9488]' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+          className={`py-2.5 px-4 font-extrabold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+            activeTab === 'eligibility'
+              ? 'bg-gradient-to-r from-[#0D9488] via-[#06B6D4] to-[#10B981] text-white shadow-lg shadow-teal-500/40 border border-teal-300/40 scale-[1.03]'
+              : 'bg-white dark:bg-slate-800/90 text-slate-800 dark:text-slate-100 hover:text-teal-600 dark:hover:text-teal-300 border border-slate-200 dark:border-slate-700 hover:border-teal-400 hover:shadow-md hover:shadow-teal-500/20'
+          }`}
         >
           🔍 Instant NIN Coverage Verification
         </button>

@@ -1381,16 +1381,16 @@ function MemberDashboardInner({ currentUser, onRefreshData }: MemberDashboardPro
         </div>
       ) : null}
 
-      {/* Nav Tabs */}
-      <div className="flex border-b border-gray-200 overflow-x-auto scrollbar-thin whitespace-nowrap">
+      {/* Nav Tabs — High Visibility Glowing Pills */}
+      <div className="flex items-center gap-2 border-b border-gray-200 dark:border-slate-800 pb-3.5 overflow-x-auto scrollbar-thin whitespace-nowrap pt-1">
         {[
-          { id: 'overview', label: 'Overview & Policy Card' },
-          { id: 'claims', label: 'My Claims history' },
-          { id: 'premiums', label: 'Premiums Tracking' },
+          { id: 'overview', label: '📊 Overview & Policy Card' },
+          { id: 'claims', label: '📑 My Claims History' },
+          { id: 'premiums', label: '💳 Premiums Tracking' },
           { id: 'beneficiaries', label: '👨‍👩‍👧 Dependants & Beneficiaries' },
-          { id: 'checker', label: 'Coverage benefits Checker' },
-          { id: 'estimator', label: 'Premium Estimator' },
-          { id: 'providers', label: 'Accredited Clinics & Route Finder' },
+          { id: 'checker', label: '🔍 Coverage Benefits Checker' },
+          { id: 'estimator', label: '🧮 Premium Estimator' },
+          { id: 'providers', label: '🏥 Accredited Clinics & Route Finder' },
           { id: 'ai_chat', label: '🛡️ Underwriting AI Assistant' },
           { id: 'settings', label: '⚙️ Profile Settings' },
           { id: 'hologram', label: '🔮 3D Diagnostics Hologram' }
@@ -1398,7 +1398,11 @@ function MemberDashboardInner({ currentUser, onRefreshData }: MemberDashboardPro
           <button
             key={t.id}
             onClick={() => setActiveTab(t.id as any)}
-            className={`py-3 px-4 font-bold text-xs border-b-2 transition-colors flex-shrink-0 ${activeTab === t.id ? 'border-[#0D9488] text-[#0D9488]' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+            className={`py-2.5 px-4 font-extrabold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+              activeTab === t.id
+                ? 'bg-gradient-to-r from-[#0D9488] via-[#06B6D4] to-[#10B981] text-white shadow-lg shadow-teal-500/40 border border-teal-300/40 scale-[1.03]'
+                : 'bg-white dark:bg-slate-800/90 text-slate-800 dark:text-slate-100 hover:text-teal-600 dark:hover:text-teal-300 border border-slate-200 dark:border-slate-700 hover:border-teal-400 hover:shadow-md hover:shadow-teal-500/20'
+            }`}
           >
             {t.label}
           </button>

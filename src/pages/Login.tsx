@@ -17,6 +17,9 @@ interface LoginPageProps {
   onLoginSuccess: (userId: string) => Promise<void>;
 }
 
+const DEMO_ACCOUNTS_ENABLED =
+  import.meta.env.DEV && import.meta.env.VITE_ENABLE_DEMO_ACCOUNTS !== 'false';
+
 const ROLE_PORTALS = [
   {
     key: 'member',
@@ -86,6 +89,11 @@ export default function Login({ onLoginSuccess }: LoginPageProps) {
   };
 
   const handleQuickFillDemo = () => {
+    if (!DEMO_ACCOUNTS_ENABLED) {
+      setError('Demo credentials are disabled in production mode. Use your real account details.');
+      return;
+    }
+
     setEmail(currentPortal.demoEmail);
     setPassword(currentPortal.demoPass);
     setError('');
@@ -180,13 +188,15 @@ export default function Login({ onLoginSuccess }: LoginPageProps) {
             </div>
             <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">{currentPortal.subtitle}</p>
           </div>
-          <button
-            type="button"
-            onClick={handleQuickFillDemo}
-            className="shrink-0 text-[10px] font-mono font-bold bg-[#0D9488] hover:bg-[#0b7e74] text-white shadow-md shadow-teal-500/20 px-3 py-1.5 rounded-xl transition-all hover:scale-105 cursor-pointer"
-          >
-            Fill Demo Credentials
-          </button>
+          {DEMO_ACCOUNTS_ENABLED && (
+            <button
+              type="button"
+              onClick={handleQuickFillDemo}
+              className="shrink-0 text-[10px] font-mono font-bold bg-[#0D9488] hover:bg-[#0b7e74] text-white shadow-md shadow-teal-500/20 px-3 py-1.5 rounded-xl transition-all hover:scale-105 cursor-pointer"
+            >
+              Fill Demo Credentials
+            </button>
+          )}
         </div>
 
         {/* Error Alert */}

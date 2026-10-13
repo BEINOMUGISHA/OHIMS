@@ -10,14 +10,18 @@ import { createClient } from '@supabase/supabase-js';
 // Fall back to build-time env vars (Vite replaces import.meta.env at compile time).
 // Hardcoded values ensure the GitHub Pages build always has credentials.
 const SUPABASE_URL =
-  (import.meta as any).env?.VITE_SUPABASE_URL ||
-  'https://kdvtawddhskanutixkeu.supabase.co';
+  import.meta.env.VITE_SUPABASE_URL ||
+  (import.meta.env.DEV ? 'https://kdvtawddhskanutixkeu.supabase.co' : '');
 
 const SUPABASE_ANON_KEY =
-  (import.meta as any).env?.VITE_SUPABASE_ANON_KEY ||
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtkdnRhd2RkaHNrYW51dGl4a2V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NDYzMjksImV4cCI6MjEwMDEyMjMyOX0.YWvgGCWhxuj3mET7axErsnaiB-RSfdawD0FVr86A4z0';
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  (import.meta.env.DEV ? 'demo-anon-key' : '');
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+if (import.meta.env.PROD && (!SUPABASE_URL || !SUPABASE_ANON_KEY || SUPABASE_URL.includes('your-project-id'))) {
+  console.warn('[OHIMS] Missing Supabase environment configuration. Frontend auth/data APIs may not work until VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are configured.');
+}
+
+export const supabase = createClient(SUPABASE_URL || 'https://placeholder.supabase.co', SUPABASE_ANON_KEY || 'placeholder-key', {
   auth: {
     persistSession: true,
     autoRefreshToken: true,

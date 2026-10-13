@@ -155,8 +155,8 @@ function MemberDashboardInner({ currentUser, onRefreshData }: MemberDashboardPro
       setLoading(true);
       // Fetch full member profile with nested policies, premiums, beneficiaries
       const details = await membersApi.get(currentUser.id);
-      const profile = details || {};
-      const rawPolicies = profile.policies || [];
+      const profile = (details as any) || {};
+      const rawPolicies = Array.isArray(profile?.policies) ? profile.policies : [];
       const policies = Array.isArray(rawPolicies) ? rawPolicies : [];
       const activePolicy = policies[0] || null;
 

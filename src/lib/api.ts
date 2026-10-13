@@ -13,6 +13,19 @@ import { supabase } from './supabase';
 import { v4 as uuidv4 } from 'uuid';
 import { translateError, safeCall, ApiResponse } from './errors';
 
+export const ROLE_ACCESS_CODES: Record<string, string> = {
+  staff: (import.meta.env.VITE_STAFF_ACCESS_CODE || 'STAFF-OHIMS-2026').trim(),
+  provider: (import.meta.env.VITE_CLINIC_ACCESS_CODE || 'CLINIC-OHIMS-2026').trim(),
+  admin: (import.meta.env.VITE_ADMIN_ACCESS_CODE || 'ADMIN-OHIMS-2026').trim(),
+  member: '',
+};
+
+export const ROLE_ACCESS_DISTRIBUTION = {
+  staff: 'Share with OHIMS staff only via approved internal channels.',
+  provider: 'Share with accredited clinic/hospital administrators only.',
+  admin: 'Share with platform administrators only and rotate regularly.',
+};
+
 // ── helpers ────────────────────────────────────────────────────────────
 
 function generatePolicyId(): string {
@@ -82,13 +95,6 @@ export const authApi = {
       } = payload;
 
       // ── Access Code Validation ─────────────────────────────────────
-      const ROLE_ACCESS_CODES: Record<string, string> = {
-        admin:    'ADMIN-OHIMS-2026',
-        staff:    'STAFF-OHIMS-2026',
-        provider: 'CLINIC-OHIMS-2026',
-        member:   '',  // members can register freely
-      };
-
       const validRoles = Object.keys(ROLE_ACCESS_CODES);
       if (!validRoles.includes(role)) {
         throw new Error(`Invalid role "${role}". Choose: Member, Staff, Clinic Provider, or Admin.`);

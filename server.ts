@@ -13,16 +13,14 @@ import { createServer as createViteServer } from "vite";
 import { createClient } from "@supabase/supabase-js";
 
 // ─── Supabase client (server-side) ────────────────────────────────────────────
-const SUPABASE_URL =
-  process.env.VITE_SUPABASE_URL ||
-  "https://klcfdbsvlxfenzbzltvq.supabase.co";
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || "";
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
 
-const SUPABASE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.VITE_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtsY2ZkYnN2bHhmZW56YnpsdHZxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4MTYxOTIsImV4cCI6MjA5ODM5MjE5Mn0.fvRTEg_6G-XJEo2QG_uj0sKqAUsJN7N_qYDWDOExfUY";
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.warn('[OHIMS Server] Missing Supabase configuration. Set VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in your environment.');
+}
 
-const db = createClient(SUPABASE_URL, SUPABASE_KEY, {
+const db = createClient(SUPABASE_URL || 'https://placeholder.supabase.co', SUPABASE_KEY || 'placeholder-key', {
   auth: { persistSession: false },
 });
 

@@ -25,6 +25,9 @@ import {
   authApi,
 } from './lib/api';
 
+const DEMO_ACCOUNTS_ENABLED =
+  import.meta.env.DEV && import.meta.env.VITE_ENABLE_DEMO_ACCOUNTS !== 'false';
+
 // Code-split heavy routes for instant initial download
 const Login = lazy(() => import('./pages/Login'));
 const Register = lazy(() => import('./pages/Register'));
@@ -104,6 +107,11 @@ function AppInner() {
 
   // Handle user swap
   const handleUserSwap = async (accountKey: string) => {
+    if (!DEMO_ACCOUNTS_ENABLED) {
+      showToast('Demo account switching is disabled in production mode.', 'info');
+      return;
+    }
+
     setLoading(true);
     try {
       const demoMap: Record<string, { email: string; pass: string }> = {

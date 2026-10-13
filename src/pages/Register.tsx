@@ -272,7 +272,7 @@ export default function Register({ plans, onLoginSuccess }: RegisterPageProps) {
           <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 flex items-start gap-2">
             <KeyRound className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
             <p className="text-xs text-amber-800 dark:text-amber-300">
-              <span className="font-bold">Access code required</span> — you need a valid OHIMS system access code to register as {currentRoleOption.label}. Contact your system administrator if you don't have one.
+              <span className="font-bold">Access code required</span> — your system administrator must distribute this code privately for {currentRoleOption.label}. Keep it confidential and rotate it periodically.
             </p>
           </div>
         )}

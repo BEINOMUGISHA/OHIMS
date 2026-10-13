@@ -8,7 +8,7 @@
  * ─────────────────────────────────────────────────────────────
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useToast } from './useToast';
@@ -23,7 +23,6 @@ interface UseSessionOptions {
 export function useSession(options: UseSessionOptions = {}): void {
   const { showToast } = useToast();
   const navigate = useNavigate();
-  const isIntentionalSignOut = useRef(false);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -34,9 +33,8 @@ export function useSession(options: UseSessionOptions = {}): void {
         }
 
         if (event === 'SIGNED_OUT') {
-          if (isIntentionalSignOut.current) {
+          if (isIntentionalLogout()) {
             // Intentional logout — let App.tsx handle cleanup
-            isIntentionalSignOut.current = false;
             options.onSignOut?.();
             return;
           }
@@ -70,8 +68,7 @@ export function useSession(options: UseSessionOptions = {}): void {
 
   // Expose a way for the logout button to flag intentional sign-out
   // so the watcher doesn't show an "expired" toast.
-  // Access via the global ref: useSession doesn't need to return anything
-  // because App.tsx calls supabase.auth.signOut() directly.
+  // App.tsx calls flagIntentionalLogout() just before authApi.logout().
 }
 
 /**

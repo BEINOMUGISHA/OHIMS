@@ -341,7 +341,7 @@ class LocalDatabase {
         name: item.name,
         email: item.email,
         password_hash: hashPassword('member123'), // standard password
-        role: 'policyholder',
+        role: 'member',
         phone: item.phone,
         created_at: new Date('2026-02-01T10:00:00Z').toISOString()
       };

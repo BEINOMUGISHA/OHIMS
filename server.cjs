@@ -27,9 +27,12 @@ var import_config = require("dotenv/config");
 var import_genai = require("@google/genai");
 var import_vite = require("vite");
 var import_supabase_js = require("@supabase/supabase-js");
-var SUPABASE_URL = process.env.VITE_SUPABASE_URL || "https://klcfdbsvlxfenzbzltvq.supabase.co";
-var SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtsY2ZkYnN2bHhmZW56YnpsdHZxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4MTYxOTIsImV4cCI6MjA5ODM5MjE5Mn0.fvRTEg_6G-XJEo2QG_uj0sKqAUsJN7N_qYDWDOExfUY";
-var db = (0, import_supabase_js.createClient)(SUPABASE_URL, SUPABASE_KEY, {
+var SUPABASE_URL = process.env.VITE_SUPABASE_URL || "";
+var SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.warn("[OHIMS Server] Missing Supabase configuration. Set VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in your environment.");
+}
+var db = (0, import_supabase_js.createClient)(SUPABASE_URL || "https://placeholder.supabase.co", SUPABASE_KEY || "placeholder-key", {
   auth: { persistSession: false }
 });
 async function writeAudit(userId, userName, action, entity, entityId) {

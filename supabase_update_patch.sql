@@ -228,6 +228,49 @@ DROP POLICY IF EXISTS "audit: admin reads" ON public.audit_logs;
 CREATE POLICY "audit: admin reads" ON public.audit_logs
   FOR SELECT USING (public.fn_auth_role() = 'admin');
 
+-- ─────────────────────────────────────────────────────────────────────
+-- 12. Access Codes & Invitations (Admin issues to Clinic and Staff)
+-- ─────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.access_codes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code TEXT NOT NULL UNIQUE,
+    role TEXT NOT NULL CHECK (role IN ('provider', 'staff', 'admin')),
+    recipient_name TEXT NOT NULL,
+    recipient_contact TEXT,
+    notes TEXT,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'used', 'revoked')),
+    max_uses INTEGER NOT NULL DEFAULT 1,
+    use_count INTEGER NOT NULL DEFAULT 0,
+    issued_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+    issued_by_name TEXT NOT NULL DEFAULT 'Admin',
+    expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT now() NOT NULL
+);
+
+ALTER TABLE public.system_settings 
+  ADD COLUMN IF NOT EXISTS staff_access_code TEXT DEFAULT 'STAFF-OHIMS-2026',
+  ADD COLUMN IF NOT EXISTS clinic_access_code TEXT DEFAULT 'CLINIC-OHIMS-2026',
+  ADD COLUMN IF NOT EXISTS admin_access_code TEXT DEFAULT 'ADMIN-OHIMS-2026';
+
+ALTER TABLE public.access_codes ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "access_codes: staff and admin manage" ON public.access_codes;
+CREATE POLICY "access_codes: staff and admin manage" ON public.access_codes
+  FOR ALL USING (public.fn_auth_role() IN ('admin', 'staff'));
+
+DROP POLICY IF EXISTS "access_codes: public verify lookup" ON public.access_codes;
+CREATE POLICY "access_codes: public verify lookup" ON public.access_codes
+  FOR SELECT USING (true);
+
+-- Seed default issued passes if table is empty
+INSERT INTO public.access_codes (code, role, recipient_name, recipient_contact, notes, max_uses, use_count, issued_by_name)
+VALUES
+  ('CLINIC-MULAGO-2026', 'provider', 'Mulago National Referral Hospital', '+256414530220', 'Approved primary national clinic partner onboarding pass', 5, 1, 'Admin'),
+  ('CLINIC-CASE-2026', 'provider', 'Case Medical Centre Kampala', '+256312260736', 'Accredited specialist provider access pass', 3, 0, 'Admin'),
+  ('STAFF-UNDERWRITE-2026', 'staff', 'Claims Underwriting Operations Staff', 'claims-team@ohims.ug', 'Official staff underwriter onboarding code', 10, 2, 'Admin')
+ON CONFLICT (code) DO NOTHING;
+
 -- =====================================================================
 -- PATCH v2 COMPLETE
 -- Summary of changes:

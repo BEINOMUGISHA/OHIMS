@@ -12,6 +12,7 @@
 import { supabase } from './supabase';
 import { v4 as uuidv4 } from 'uuid';
 import { translateError, safeCall, ApiResponse } from './errors';
+import { AccessCode, MasterAccessCodes } from '../types';
 
 export const ROLE_ACCESS_CODES: Record<string, string> = {
   staff: (import.meta.env.VITE_STAFF_ACCESS_CODE || 'STAFF-OHIMS-2026').trim(),
@@ -62,16 +63,347 @@ async function addNotification(
   await supabase.from('notifications').insert({ user_id: userId, message, type });
 }
 
+// ── ACCESS CODES & INVITATIONS ──────────────────────────────────────────
+
+const DEFAULT_MASTER_CODES: MasterAccessCodes = {
+  staff: (import.meta.env.VITE_STAFF_ACCESS_CODE || 'STAFF-OHIMS-2026').trim(),
+  provider: (import.meta.env.VITE_CLINIC_ACCESS_CODE || 'CLINIC-OHIMS-2026').trim(),
+  admin: (import.meta.env.VITE_ADMIN_ACCESS_CODE || 'ADMIN-OHIMS-2026').trim(),
+};
+
+const SEED_ISSUED_CODES: AccessCode[] = [
+  {
+    id: 'code-seed-1',
+    code: 'CLINIC-MULAGO-2026',
+    role: 'provider',
+    recipient_name: 'Mulago National Referral Hospital',
+    recipient_contact: '+256414530220',
+    notes: 'Approved primary national clinic partner onboarding pass',
+    status: 'active',
+    max_uses: 5,
+    use_count: 1,
+    issued_by_name: 'Admin Ahumuza Brian',
+    created_at: new Date(Date.now() - 86400000 * 7).toISOString(),
+  },
+  {
+    id: 'code-seed-2',
+    code: 'CLINIC-CASE-2026',
+    role: 'provider',
+    recipient_name: 'Case Medical Centre Kampala',
+    recipient_contact: '+256312260736',
+    notes: 'Accredited specialist provider access pass',
+    status: 'active',
+    max_uses: 3,
+    use_count: 0,
+    issued_by_name: 'Admin Ahumuza Brian',
+    created_at: new Date(Date.now() - 86400000 * 4).toISOString(),
+  },
+  {
+    id: 'code-seed-3',
+    code: 'STAFF-UNDERWRITE-2026',
+    role: 'staff',
+    recipient_name: 'Claims Underwriting Operations Staff',
+    recipient_contact: 'claims-team@ohims.ug',
+    notes: 'Official staff underwriter onboarding code',
+    status: 'active',
+    max_uses: 10,
+    use_count: 2,
+    issued_by_name: 'Admin Ahumuza Brian',
+    created_at: new Date(Date.now() - 86400000 * 10).toISOString(),
+  },
+];
+
+function getStoredMasterCodes(): MasterAccessCodes {
+  try {
+    const raw = localStorage.getItem('ohims_master_access_codes');
+    if (raw) return { ...DEFAULT_MASTER_CODES, ...JSON.parse(raw) };
+  } catch (_) {}
+  return DEFAULT_MASTER_CODES;
+}
+
+function saveStoredMasterCodes(codes: MasterAccessCodes): void {
+  try {
+    localStorage.setItem('ohims_master_access_codes', JSON.stringify(codes));
+  } catch (_) {}
+}
+
+function getStoredIssuedCodes(): AccessCode[] {
+  try {
+    const raw = localStorage.getItem('ohims_issued_access_codes');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (_) {}
+  try {
+    localStorage.setItem('ohims_issued_access_codes', JSON.stringify(SEED_ISSUED_CODES));
+  } catch (_) {}
+  return SEED_ISSUED_CODES;
+}
+
+function saveStoredIssuedCodes(list: AccessCode[]): void {
+  try {
+    localStorage.setItem('ohims_issued_access_codes', JSON.stringify(list));
+  } catch (_) {}
+}
+
+export const accessCodesApi = {
+  getMasterCodes: async (): Promise<MasterAccessCodes> => {
+    try {
+      const { data } = await supabase
+        .from('system_settings')
+        .select('staff_access_code, clinic_access_code, admin_access_code')
+        .eq('id', 1)
+        .maybeSingle();
+
+      if (data) {
+        const merged: MasterAccessCodes = {
+          staff: data.staff_access_code || getStoredMasterCodes().staff,
+          provider: data.clinic_access_code || getStoredMasterCodes().provider,
+          admin: data.admin_access_code || getStoredMasterCodes().admin,
+        };
+        saveStoredMasterCodes(merged);
+        return merged;
+      }
+    } catch (_) {}
+    return getStoredMasterCodes();
+  },
+
+  updateMasterCodes: async (
+    updates: Partial<MasterAccessCodes>,
+    actorId?: string,
+    actorName: string = 'Admin'
+  ): Promise<ApiResponse<MasterAccessCodes>> => {
+    return safeCall(async () => {
+      const current = await accessCodesApi.getMasterCodes();
+      const updated: MasterAccessCodes = {
+        staff: (updates.staff ?? current.staff).trim(),
+        provider: (updates.provider ?? current.provider).trim(),
+        admin: (updates.admin ?? current.admin).trim(),
+      };
+      saveStoredMasterCodes(updated);
+
+      try {
+        await supabase
+          .from('system_settings')
+          .update({
+            staff_access_code: updated.staff,
+            clinic_access_code: updated.provider,
+            admin_access_code: updated.admin,
+          })
+          .eq('id', 1);
+      } catch (_) {}
+
+      await writeAudit(actorId || null, actorName, 'UPDATED_MASTER_ACCESS_CODES', 'access_codes', 'master');
+      return updated;
+    });
+  },
+
+  list: async (): Promise<ApiResponse<AccessCode[]>> => {
+    return safeCall(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('access_codes')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (!error && data && data.length > 0) {
+          saveStoredIssuedCodes(data as AccessCode[]);
+          return data as AccessCode[];
+        }
+      } catch (_) {}
+      return getStoredIssuedCodes();
+    });
+  },
+
+  issue: async (payload: {
+    code: string;
+    role: 'provider' | 'staff' | 'admin';
+    recipient_name: string;
+    recipient_contact?: string;
+    notes?: string;
+    max_uses?: number;
+    expires_at?: string;
+    issued_by?: string;
+    issued_by_name?: string;
+  }): Promise<ApiResponse<AccessCode>> => {
+    return safeCall(async () => {
+      const id = `code-${Date.now()}-${Math.floor(Math.random() * 9000) + 1000}`;
+      const now = new Date().toISOString();
+      const record: AccessCode = {
+        id,
+        code: payload.code.trim().toUpperCase(),
+        role: payload.role,
+        recipient_name: payload.recipient_name.trim(),
+        recipient_contact: payload.recipient_contact?.trim() || '',
+        notes: payload.notes?.trim() || '',
+        status: 'active',
+        max_uses: payload.max_uses && payload.max_uses > 0 ? payload.max_uses : 1,
+        use_count: 0,
+        issued_by: payload.issued_by,
+        issued_by_name: payload.issued_by_name || 'Admin',
+        expires_at: payload.expires_at || undefined,
+        created_at: now,
+        updated_at: now,
+      };
+
+      try {
+        const { data, error } = await supabase
+          .from('access_codes')
+          .insert(record)
+          .select()
+          .single();
+        if (!error && data) {
+          const list = getStoredIssuedCodes();
+          saveStoredIssuedCodes([data as AccessCode, ...list.filter((c) => c.id !== id)]);
+          await writeAudit(
+            payload.issued_by || null,
+            payload.issued_by_name || 'Admin',
+            `ISSUED_${payload.role.toUpperCase()}_ACCESS_CODE`,
+            'access_codes',
+            data.id
+          );
+          return data as AccessCode;
+        }
+      } catch (_) {}
+
+      // Fallback local storage
+      const list = getStoredIssuedCodes();
+      const updatedList = [record, ...list.filter((c) => c.code !== record.code)];
+      saveStoredIssuedCodes(updatedList);
+
+      await writeAudit(
+        payload.issued_by || null,
+        payload.issued_by_name || 'Admin',
+        `ISSUED_${payload.role.toUpperCase()}_ACCESS_CODE`,
+        'access_codes',
+        record.id
+      );
+
+      return record;
+    });
+  },
+
+  revoke: async (id: string, actorId?: string, actorName: string = 'Admin'): Promise<ApiResponse<boolean>> => {
+    return safeCall(async () => {
+      try {
+        await supabase
+          .from('access_codes')
+          .update({ status: 'revoked', updated_at: new Date().toISOString() })
+          .eq('id', id);
+      } catch (_) {}
+
+      const list = getStoredIssuedCodes();
+      const updated = list.map((c) => (c.id === id ? { ...c, status: 'revoked' as const } : c));
+      saveStoredIssuedCodes(updated);
+
+      await writeAudit(actorId || null, actorName, 'REVOKED_ACCESS_CODE', 'access_codes', id);
+      return true;
+    });
+  },
+
+  delete: async (id: string, actorId?: string, actorName: string = 'Admin'): Promise<ApiResponse<boolean>> => {
+    return safeCall(async () => {
+      try {
+        await supabase.from('access_codes').delete().eq('id', id);
+      } catch (_) {}
+
+      const list = getStoredIssuedCodes();
+      saveStoredIssuedCodes(list.filter((c) => c.id !== id));
+
+      await writeAudit(actorId || null, actorName, 'DELETED_ACCESS_CODE', 'access_codes', id);
+      return true;
+    });
+  },
+
+  verify: async (
+    role: string,
+    inputCode: string
+  ): Promise<{ valid: boolean; message?: string; codeRecord?: AccessCode }> => {
+    if (role === 'member') return { valid: true };
+    const codeClean = (inputCode || '').trim().toUpperCase();
+    if (!codeClean) {
+      return {
+        valid: false,
+        message: `An access code is required to register as ${role}. Please contact your administrator.`,
+      };
+    }
+
+    // 1. Check Master Codes
+    const masterCodes = await accessCodesApi.getMasterCodes();
+    const masterTarget = masterCodes[role as keyof MasterAccessCodes];
+    if (masterTarget && masterTarget.toUpperCase() === codeClean) {
+      return { valid: true };
+    }
+
+    // 2. Check Static Env Code fallback
+    const envTarget = ROLE_ACCESS_CODES[role];
+    if (envTarget && envTarget.toUpperCase() === codeClean) {
+      return { valid: true };
+    }
+
+    // 3. Check Issued Access Codes (Database / Storage)
+    const { data: issuedList } = await accessCodesApi.list();
+    const matched = (issuedList || []).find(
+      (c) => c.code.toUpperCase() === codeClean && c.role === role
+    );
+
+    if (matched) {
+      if (matched.status === 'revoked') {
+        return { valid: false, message: 'This access code has been revoked by the administrator.' };
+      }
+      if (matched.status === 'used' || (matched.max_uses && matched.use_count >= matched.max_uses)) {
+        return { valid: false, message: 'This access code has already reached its maximum usage limit.' };
+      }
+      if (matched.expires_at && new Date(matched.expires_at) < new Date()) {
+        return { valid: false, message: 'This access code has expired. Please contact the administrator for a renewed code.' };
+      }
+
+      // Increment usage count
+      const newCount = (matched.use_count || 0) + 1;
+      const isNowUsed = newCount >= (matched.max_uses || 1);
+      const updatedStatus: 'active' | 'used' = isNowUsed ? 'used' : 'active';
+
+      try {
+        await supabase
+          .from('access_codes')
+          .update({ use_count: newCount, status: updatedStatus, updated_at: new Date().toISOString() })
+          .eq('id', matched.id);
+      } catch (_) {}
+
+      const localList = getStoredIssuedCodes();
+      const updatedLocal = localList.map((c) =>
+        c.id === matched.id ? { ...c, use_count: newCount, status: updatedStatus } : c
+      );
+      saveStoredIssuedCodes(updatedLocal);
+
+      await writeAudit(null, matched.recipient_name, 'USED_ACCESS_CODE', 'access_codes', matched.id);
+      return { valid: true, codeRecord: matched };
+    }
+
+    const roleLabel =
+      role === 'provider'
+        ? 'Clinic / Healthcare Provider'
+        : role === 'staff'
+        ? 'Insurance Staff'
+        : 'Administrator';
+    return {
+      valid: false,
+      message: `Invalid access code for ${roleLabel}. Please contact the OHIMS Administrator to receive an approved access code.`,
+    };
+  },
+};
+
 // ── AUTH ───────────────────────────────────────────────────────────────
 
 export const authApi = {
   /**
-   * Role-Based Registration with Access Code Validation.
-   * Prevents impersonation: each role requires a secret access code.
+   * Role-Based Registration with Dynamic Access Code Validation.
+   * Admin issues access codes to Clinics and Staff.
    * Member → open registration (no code needed)
-   * Staff  → requires STAFF-OHIMS-2026
-   * Provider/Clinic → requires CLINIC-OHIMS-2026
-   * Admin  → requires ADMIN-OHIMS-2026
+   * Staff  → requires Admin-issued code or active Staff master code
+   * Provider/Clinic → requires Admin-issued code or active Clinic master code
+   * Admin  → requires Admin master code
    */
   register: async (payload: {
     name: string;
@@ -100,11 +432,14 @@ export const authApi = {
         throw new Error(`Invalid role "${role}". Choose: Member, Staff, Clinic Provider, or Admin.`);
       }
 
-      const requiredCode = ROLE_ACCESS_CODES[role];
-      if (requiredCode && access_code.trim() !== requiredCode) {
-        throw new Error(
-          `Invalid access code for ${role} role. Please contact your OHIMS system administrator for the correct code.`
-        );
+      if (role !== 'member') {
+        const verifyRes = await accessCodesApi.verify(role, access_code);
+        if (!verifyRes.valid) {
+          throw new Error(
+            verifyRes.message ||
+              `Invalid access code for ${role} role. Please contact your OHIMS administrator.`
+          );
+        }
       }
 
       // ── Supabase Auth Sign Up ──────────────────────────────────────

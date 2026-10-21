@@ -18,12 +18,24 @@ import {
   X,
   Clock,
   Download,
-  Search
+  Search,
+  Key,
+  Copy,
+  Check,
+  Share2,
+  Trash2,
+  Lock,
+  Unlock,
+  Sparkles,
+  Plus,
+  Send,
+  Building2,
+  Briefcase
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
-import { User, Claim } from '../types';
+import { User, Claim, AccessCode, MasterAccessCodes } from '../types';
 import {
-  claimsApi, policiesApi, premiumsApi, providersApi, plansApi, settingsApi, auditApi, usersApi
+  claimsApi, policiesApi, premiumsApi, providersApi, plansApi, settingsApi, auditApi, usersApi, accessCodesApi
 } from '../lib/api';
 
 // Western Uganda + Kampala Referral Hospitals
@@ -58,7 +70,41 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
   const [policies, setPolicies] = useState<any[]>([]);
   const [premiums, setPremiums] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'claims' | 'policies' | 'members' | 'reminders' | 'providers' | 'plans' | 'settings' | 'logs'>('claims');
+  const [activeTab, setActiveTab] = useState<'claims' | 'policies' | 'members' | 'reminders' | 'providers' | 'plans' | 'settings' | 'logs' | 'access_codes'>('claims');
+
+  // Access Codes & Invites (Admin issues to Clinic and Staff)
+  const [accessCodes, setAccessCodes] = useState<AccessCode[]>([]);
+  const [masterCodes, setMasterCodes] = useState<MasterAccessCodes>({
+    staff: 'STAFF-OHIMS-2026',
+    provider: 'CLINIC-OHIMS-2026',
+    admin: 'ADMIN-OHIMS-2026',
+  });
+  const [loadingAccessCodes, setLoadingAccessCodes] = useState(false);
+  const [showIssueModal, setShowIssueModal] = useState(false);
+  const [issueRole, setIssueRole] = useState<'provider' | 'staff'>('provider');
+  const [issueRecipientName, setIssueRecipientName] = useState('');
+  const [issueRecipientContact, setIssueRecipientContact] = useState('');
+  const [issueCode, setIssueCode] = useState('');
+  const [issueNotes, setIssueNotes] = useState('');
+  const [issueMaxUses, setIssueMaxUses] = useState(1);
+  const [issueExpiresDays, setIssueExpiresDays] = useState(30);
+  const [issueSubmitting, setIssueSubmitting] = useState(false);
+  const [issueError, setIssueError] = useState('');
+  const [issuedSuccessPass, setIssuedSuccessPass] = useState<AccessCode | null>(null);
+
+  // Master Codes modal state
+  const [showMasterModal, setShowMasterModal] = useState(false);
+  const [editMasterStaff, setEditMasterStaff] = useState('');
+  const [editMasterClinic, setEditMasterClinic] = useState('');
+  const [editMasterAdmin, setEditMasterAdmin] = useState('');
+  const [showAdminMasterKey, setShowAdminMasterKey] = useState(false);
+  const [masterModalSaving, setMasterModalSaving] = useState(false);
+
+  // Access codes filters & copy state
+  const [accessCodeSearch, setAccessCodeSearch] = useState('');
+  const [accessCodeRoleFilter, setAccessCodeRoleFilter] = useState<'all' | 'provider' | 'staff' | 'admin'>('all');
+  const [accessCodeStatusFilter, setAccessCodeStatusFilter] = useState<'all' | 'active' | 'used' | 'revoked'>('all');
+  const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
 
   // Members Management states
   const [membersList, setMembersList] = useState<any[]>([]);
@@ -126,9 +172,11 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
       settingsApi.get(),
       auditApi.list(),
       usersApi.listAllUsers(),
+      accessCodesApi.list(),
+      accessCodesApi.getMasterCodes(),
     ]);
 
-    const [claimsRes, polRes, premRes, provRes, plansRes, settingsRes, logsRes, membersRes] = results;
+    const [claimsRes, polRes, premRes, provRes, plansRes, settingsRes, logsRes, membersRes, accessCodesRes, masterCodesRes] = results;
 
     // At least one critical dataset must succeed
     const criticalError = claimsRes.status === 'rejected' && polRes.status === 'rejected';
@@ -153,6 +201,13 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
     if (membersRes.status === 'fulfilled' && !membersRes.value.error)
       setMembersList((membersRes.value.data as any[]) ?? []);
 
+    if (accessCodesRes.status === 'fulfilled' && !accessCodesRes.value.error) {
+      setAccessCodes((accessCodesRes.value.data as AccessCode[]) ?? []);
+    }
+    if (masterCodesRes.status === 'fulfilled' && masterCodesRes.value) {
+      setMasterCodes(masterCodesRes.value as MasterAccessCodes);
+    }
+
     if (settingsRes.status === 'fulfilled' && settingsRes.value.data) {
       const s = settingsRes.value.data;
       setSettingsAllowAuto(s.allowAutoApprovalOfLowClaims);
@@ -163,6 +218,175 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
     }
 
     setLoading(false);
+  };
+
+  // ── Access Codes Handlers ─────────────────────────────────────────────
+
+  const handleGenerateRandomCode = (role: 'provider' | 'staff', name?: string) => {
+    const prefix = role === 'provider' ? 'CLINIC' : 'STAFF';
+    const cleanName = (name || '').replace(/[^a-zA-Z]/g, '').slice(0, 6).toUpperCase();
+    const tag = cleanName ? `${cleanName}-` : '';
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const code = `${prefix}-${tag}${randomSuffix}`;
+    setIssueCode(code);
+    return code;
+  };
+
+  const handleOpenIssueModal = (
+    role: 'provider' | 'staff' = 'provider',
+    prefillName = '',
+    prefillContact = '',
+    prefillNotes = ''
+  ) => {
+    setIssueRole(role);
+    setIssueRecipientName(prefillName);
+    setIssueRecipientContact(prefillContact);
+    setIssueNotes(prefillNotes);
+    setIssueMaxUses(1);
+    setIssueExpiresDays(30);
+    setIssueError('');
+    handleGenerateRandomCode(role, prefillName);
+    setShowIssueModal(true);
+  };
+
+  const handleSubmitIssueCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIssueError('');
+
+    if (!issueRecipientName.trim()) {
+      setIssueError('Recipient name is required (e.g. Clinic Name or Staff Full Name).');
+      return;
+    }
+    if (!issueCode.trim()) {
+      setIssueError('Access code cannot be empty.');
+      return;
+    }
+
+    setIssueSubmitting(true);
+    let expiresAt: string | undefined = undefined;
+    if (issueExpiresDays > 0) {
+      const expDate = new Date();
+      expDate.setDate(expDate.getDate() + issueExpiresDays);
+      expiresAt = expDate.toISOString();
+    }
+
+    const { data: newCode, error } = await accessCodesApi.issue({
+      code: issueCode.trim().toUpperCase(),
+      role: issueRole,
+      recipient_name: issueRecipientName.trim(),
+      recipient_contact: issueRecipientContact.trim(),
+      notes: issueNotes.trim(),
+      max_uses: issueMaxUses,
+      expires_at: expiresAt,
+      issued_by: currentUser.id,
+      issued_by_name: currentUser.name || 'Admin',
+    });
+
+    setIssueSubmitting(false);
+
+    if (error || !newCode) {
+      setIssueError(error || 'Failed to issue access code. Please try again.');
+      return;
+    }
+
+    showToast(`Access code ${newCode.code} issued successfully!`, 'success');
+    setShowIssueModal(false);
+    setIssuedSuccessPass(newCode);
+
+    // Refresh list
+    const { data: updatedList } = await accessCodesApi.list();
+    if (updatedList) setAccessCodes(updatedList);
+  };
+
+  const handleRevokeCode = async (id: string, codeStr: string) => {
+    if (!window.confirm(`Are you sure you want to revoke access code "${codeStr}"? Anyone attempting to use it will be blocked.`)) return;
+    const { error } = await accessCodesApi.revoke(id, currentUser.id, currentUser.name);
+    if (error) {
+      showToast(`Failed to revoke code: ${error}`, 'error');
+    } else {
+      showToast(`Access code ${codeStr} revoked.`, 'info');
+      const { data: updatedList } = await accessCodesApi.list();
+      if (updatedList) setAccessCodes(updatedList);
+    }
+  };
+
+  const handleDeleteCode = async (id: string, codeStr: string) => {
+    if (!window.confirm(`Delete record for access code "${codeStr}"?`)) return;
+    const { error } = await accessCodesApi.delete(id, currentUser.id, currentUser.name);
+    if (error) {
+      showToast(`Failed to delete code: ${error}`, 'error');
+    } else {
+      showToast(`Access code deleted.`, 'info');
+      const { data: updatedList } = await accessCodesApi.list();
+      if (updatedList) setAccessCodes(updatedList);
+    }
+  };
+
+  const handleOpenMasterModal = () => {
+    setEditMasterClinic(masterCodes.provider);
+    setEditMasterStaff(masterCodes.staff);
+    setEditMasterAdmin(masterCodes.admin);
+    setShowMasterModal(true);
+  };
+
+  const handleSaveMasterCodes = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMasterModalSaving(true);
+    const { data, error } = await accessCodesApi.updateMasterCodes(
+      {
+        provider: editMasterClinic,
+        staff: editMasterStaff,
+        admin: editMasterAdmin,
+      },
+      currentUser.id,
+      currentUser.name
+    );
+    setMasterModalSaving(false);
+    if (error || !data) {
+      showToast(`Failed to update master codes: ${error}`, 'error');
+    } else {
+      setMasterCodes(data);
+      setShowMasterModal(false);
+      showToast('Master access codes updated and deployed.', 'success');
+    }
+  };
+
+  const handleCopyText = (text: string, id: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedCodeId(id);
+    showToast(`Copied ${label} to clipboard!`, 'info');
+    setTimeout(() => {
+      setCopiedCodeId((prev) => (prev === id ? null : prev));
+    }, 2500);
+  };
+
+  const getInvitationShareText = (record: AccessCode): string => {
+    const roleLabel =
+      record.role === 'provider'
+        ? 'Healthcare Clinic / Hospital'
+        : record.role === 'staff'
+        ? 'Insurance Underwriter / Staff'
+        : 'Administrator';
+
+    const origin = window.location.origin + window.location.pathname;
+    const registerUrl = `${origin}#/register`;
+
+    return `*OHIMS UGANDA — OFFICIAL REGISTRATION ACCESS PASS*
+--------------------------------------------------
+Recipient: ${record.recipient_name}
+Authorized Role: ${roleLabel}
+Access Code: ${record.code}
+Usage Limit: ${record.max_uses === 1 ? 'Single Use Only' : `${record.max_uses} Registrations`}
+${record.expires_at ? `Expires: ${new Date(record.expires_at).toLocaleDateString()}` : 'Status: Active'}
+
+*How to Register:*
+1. Visit the OHIMS Uganda Portal: ${registerUrl}
+2. Select your role as "${roleLabel}"
+3. Enter your assigned Access Code: *${record.code}*
+4. Complete your organization or profile details to activate your dashboard.
+
+Issued by: OHIMS Administration (${currentUser.name || 'Admin'})
+For inquiries, contact support@ohims.ug.`;
   };
 
   const handleSuspendMember = async (userId: string) => {
@@ -578,6 +802,18 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
             </button>
           )}
           <button
+            onClick={() => handleOpenIssueModal('provider')}
+            className="bg-[#0D9488] hover:bg-[#0b7e74] text-white text-xs font-bold px-4 py-2.5 rounded-lg shadow transition-transform hover:-translate-y-0.5 flex items-center gap-1.5"
+          >
+            <Key className="h-4 w-4" /> Issue Clinic Code
+          </button>
+          <button
+            onClick={() => handleOpenIssueModal('staff')}
+            className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-4 py-2.5 rounded-lg shadow transition-transform hover:-translate-y-0.5 flex items-center gap-1.5"
+          >
+            <Key className="h-4 w-4" /> Issue Staff Code
+          </button>
+          <button
             onClick={() => setActiveTab('reminders')}
             className="bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold px-4 py-2.5 rounded-lg border border-amber-200 transition-colors flex items-center gap-1.5"
           >
@@ -592,6 +828,7 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
           { id: 'claims', label: `📑 Pending Claims (${claims.filter(c=>c.status==='submitted'||c.status==='under_review').length})` },
           { id: 'policies', label: '🛡️ Policies & Suspensions' },
           { id: 'members', label: '👥 User Registry & Accounts' },
+          { id: 'access_codes', label: `🔑 Access Codes & Invites (${accessCodes.filter(c=>c.status==='active').length})` },
           { id: 'reminders', label: '💳 Billing & Reminders' },
           { id: 'providers', label: '🏥 Healthcare Partners' },
           { id: 'plans', label: '📋 Policy Plans Editor' },
@@ -946,6 +1183,12 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
                   className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-xs bg-white outline-none focus:ring-1 focus:ring-[#0D9488]"
                 />
               </div>
+              <button
+                onClick={() => handleOpenIssueModal('staff')}
+                className="bg-purple-600 hover:bg-purple-700 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm transition-transform hover:-translate-y-0.5 whitespace-nowrap cursor-pointer"
+              >
+                <Key className="h-3.5 w-3.5" /> Issue Staff Code
+              </button>
             </div>
           </div>
 
@@ -1333,6 +1576,13 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
                         <StatusBadge status={p.accreditation_status === 'accredited' ? 'accredited' : p.accreditation_status === 'suspended' ? 'suspended' : 'pending'} size="xs" />
                       </td>
                       <td className="p-4 text-right space-x-1 whitespace-nowrap">
+                        <button
+                          onClick={() => handleOpenIssueModal('provider', p.name, p.contact, `Accredited ${p.type} in ${p.location}`)}
+                          className="bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold px-2 py-1 rounded text-[10px] inline-flex items-center gap-1 border border-purple-200 cursor-pointer"
+                          title="Issue an official onboarding access code for this clinic"
+                        >
+                          <Key className="h-3 w-3" /> Issue Code
+                        </button>
                         {p.accreditation_status !== 'accredited' && (
                           <button
                             onClick={() => handleToggleProviderAccreditation(p.id, 'accredited')}
@@ -1654,7 +1904,727 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
         </div>
       )}
 
-      {/* ==================== TAB 7: TRANSPARENCY AUDIT LOGS ==================== */}
+      {/* ==================== TAB 8: ACCESS CODES & INVITATIONS ==================== */}
+      {activeTab === 'access_codes' && (
+        <div className="space-y-6">
+          {/* Header */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="inline-flex items-center gap-1.5 bg-purple-50 text-purple-700 border border-purple-200 px-3 py-1 rounded-full text-xs font-bold font-mono uppercase mb-2">
+                <Key className="h-3.5 w-3.5" />
+                <span>Admin Credential & Onboarding Management</span>
+              </div>
+              <h3 className="text-xl font-extrabold text-[#0A1628]">Access Codes & Role Passes</h3>
+              <p className="text-xs text-gray-500 mt-1 max-w-2xl">
+                Issue, distribute, track, and rotate access credentials for partner Healthcare Clinics/Hospitals and internal Insurance Underwriting Staff.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => handleOpenIssueModal('provider')}
+                className="bg-[#0D9488] hover:bg-[#0b7e74] text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-md transition-all hover:-translate-y-0.5 flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="h-4 w-4" /> Issue Clinic Code
+              </button>
+              <button
+                onClick={() => handleOpenIssueModal('staff')}
+                className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-md transition-all hover:-translate-y-0.5 flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="h-4 w-4" /> Issue Staff Code
+              </button>
+              <button
+                onClick={handleOpenMasterModal}
+                className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-4 py-2.5 rounded-xl border border-slate-700 transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <Lock className="h-4 w-4 text-purple-300" /> Master Key Settings
+              </button>
+            </div>
+          </div>
+
+          {/* Active Master Keys Overview (3 Cards) */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Clinic Master Key */}
+            <div className="bg-gradient-to-br from-teal-900 to-slate-900 text-white p-5 rounded-2xl shadow-sm border border-teal-800/40 relative overflow-hidden">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-teal-300 font-bold flex items-center gap-1.5">
+                  <Building2 className="h-3.5 w-3.5" /> Clinic Active Master Key
+                </span>
+                <span className="bg-teal-500/20 text-teal-300 border border-teal-500/40 text-[9px] font-bold px-2 py-0.5 rounded-full font-mono">
+                  Active Master
+                </span>
+              </div>
+              <div className="bg-black/30 border border-teal-500/30 rounded-xl p-3 flex items-center justify-between">
+                <span className="font-mono text-sm font-black tracking-widest text-teal-200">
+                  {masterCodes.provider}
+                </span>
+                <button
+                  onClick={() => handleCopyText(masterCodes.provider, 'master-clinic', 'Clinic Master Access Code')}
+                  className="p-1.5 hover:bg-white/10 rounded-lg text-teal-300 transition-colors flex items-center gap-1 text-[10px] font-bold"
+                  title="Copy code"
+                >
+                  {copiedCodeId === 'master-clinic' ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                  <span>{copiedCodeId === 'master-clinic' ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
+              <p className="text-[10px] text-teal-100/70 mt-2.5 leading-relaxed">
+                Default access code for accredited clinic and hospital chief administrators to register on OHIMS.
+              </p>
+            </div>
+
+            {/* Staff Master Key */}
+            <div className="bg-gradient-to-br from-purple-950 to-slate-900 text-white p-5 rounded-2xl shadow-sm border border-purple-800/40 relative overflow-hidden">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-purple-300 font-bold flex items-center gap-1.5">
+                  <Briefcase className="h-3.5 w-3.5" /> Staff Active Master Key
+                </span>
+                <span className="bg-purple-500/20 text-purple-300 border border-purple-500/40 text-[9px] font-bold px-2 py-0.5 rounded-full font-mono">
+                  Active Master
+                </span>
+              </div>
+              <div className="bg-black/30 border border-purple-500/30 rounded-xl p-3 flex items-center justify-between">
+                <span className="font-mono text-sm font-black tracking-widest text-purple-200">
+                  {masterCodes.staff}
+                </span>
+                <button
+                  onClick={() => handleCopyText(masterCodes.staff, 'master-staff', 'Staff Master Access Code')}
+                  className="p-1.5 hover:bg-white/10 rounded-lg text-purple-300 transition-colors flex items-center gap-1 text-[10px] font-bold"
+                  title="Copy code"
+                >
+                  {copiedCodeId === 'master-staff' ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                  <span>{copiedCodeId === 'master-staff' ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
+              <p className="text-[10px] text-purple-100/70 mt-2.5 leading-relaxed">
+                Default access code for internal claims processing, triage, and underwriting representatives.
+              </p>
+            </div>
+
+            {/* Admin Master Key */}
+            <div className="bg-gradient-to-br from-slate-900 to-slate-950 text-white p-5 rounded-2xl shadow-sm border border-slate-700/60 relative overflow-hidden">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-amber-300 font-bold flex items-center gap-1.5">
+                  <Key className="h-3.5 w-3.5" /> Admin System Key
+                </span>
+                <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] font-bold px-2 py-0.5 rounded-full font-mono">
+                  High Security
+                </span>
+              </div>
+              <div className="bg-black/40 border border-slate-700 rounded-xl p-3 flex items-center justify-between">
+                <span className="font-mono text-sm font-black tracking-widest text-amber-200">
+                  {showAdminMasterKey ? masterCodes.admin : '••••••••••••••••'}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setShowAdminMasterKey(!showAdminMasterKey)}
+                    className="p-1.5 hover:bg-white/10 rounded-lg text-slate-300 transition-colors"
+                    title={showAdminMasterKey ? 'Hide key' : 'Show key'}
+                  >
+                    {showAdminMasterKey ? <Unlock className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+                  </button>
+                  <button
+                    onClick={() => handleCopyText(masterCodes.admin, 'master-admin', 'Admin Master Key')}
+                    className="p-1.5 hover:bg-white/10 rounded-lg text-amber-300 transition-colors flex items-center gap-1 text-[10px] font-bold"
+                    title="Copy code"
+                  >
+                    {copiedCodeId === 'master-admin' ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-400 mt-2.5 leading-relaxed">
+                Platform administrator root authorization key. Keep strictly confidential and rotate periodically.
+              </p>
+            </div>
+          </div>
+
+          {/* Filters & Search */}
+          <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold text-slate-500 font-mono uppercase">Filter:</span>
+              <select
+                value={accessCodeRoleFilter}
+                onChange={e => setAccessCodeRoleFilter(e.target.value as any)}
+                className="px-3 py-1.5 border border-gray-200 rounded-xl text-xs bg-white outline-none focus:ring-1 focus:ring-[#0D9488]"
+              >
+                <option value="all">All Roles</option>
+                <option value="provider">🏥 Clinics & Hospitals</option>
+                <option value="staff">💼 Insurance Staff</option>
+                <option value="admin">👑 Administrators</option>
+              </select>
+
+              <select
+                value={accessCodeStatusFilter}
+                onChange={e => setAccessCodeStatusFilter(e.target.value as any)}
+                className="px-3 py-1.5 border border-gray-200 rounded-xl text-xs bg-white outline-none focus:ring-1 focus:ring-[#0D9488]"
+              >
+                <option value="all">All Statuses</option>
+                <option value="active">Active Only</option>
+                <option value="used">Used Only</option>
+                <option value="revoked">Revoked Only</option>
+              </select>
+            </div>
+
+            <div className="relative w-full md:w-72">
+              <Search className="h-4 w-4 absolute left-3 top-2.5 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search recipient, code, contact..."
+                value={accessCodeSearch}
+                onChange={e => setAccessCodeSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-1.5 border border-gray-200 rounded-xl text-xs bg-white outline-none focus:ring-1 focus:ring-[#0D9488]"
+              />
+            </div>
+          </div>
+
+          {/* Issued Access Codes Table */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left font-sans text-xs">
+                <thead className="bg-[#0A1628] text-white font-mono uppercase tracking-wider text-[10px]">
+                  <tr>
+                    <th className="p-4">Recipient & Contact</th>
+                    <th className="p-4">Designated Role</th>
+                    <th className="p-4">Assigned Access Code</th>
+                    <th className="p-4">Usage & Limit</th>
+                    <th className="p-4">Status</th>
+                    <th className="p-4">Issued By & Date</th>
+                    <th className="p-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {(() => {
+                    const filtered = accessCodes.filter(c => {
+                      if (accessCodeRoleFilter !== 'all' && c.role !== accessCodeRoleFilter) return false;
+                      if (accessCodeStatusFilter !== 'all' && c.status !== accessCodeStatusFilter) return false;
+                      if (accessCodeSearch) {
+                        const q = accessCodeSearch.toLowerCase();
+                        const match =
+                          c.recipient_name.toLowerCase().includes(q) ||
+                          c.code.toLowerCase().includes(q) ||
+                          (c.recipient_contact || '').toLowerCase().includes(q) ||
+                          (c.notes || '').toLowerCase().includes(q);
+                        if (!match) return false;
+                      }
+                      return true;
+                    });
+
+                    if (filtered.length === 0) {
+                      return (
+                        <tr>
+                          <td colSpan={7}>
+                            <EmptyState
+                              icon={Key}
+                              title="No access codes found"
+                              message="Click 'Issue Clinic Code' or 'Issue Staff Code' to generate an authorized access pass."
+                              compact
+                            />
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    return filtered.map(c => {
+                      const isExpired = c.expires_at && new Date(c.expires_at) < new Date();
+                      const displayStatus = isExpired ? 'expired' : c.status;
+                      const roleBadge =
+                        c.role === 'provider'
+                          ? { bg: 'bg-teal-50 text-teal-800 border-teal-200', icon: '🏥', label: 'Clinic Provider' }
+                          : c.role === 'staff'
+                          ? { bg: 'bg-purple-50 text-purple-800 border-purple-200', icon: '💼', label: 'Insurance Staff' }
+                          : { bg: 'bg-amber-50 text-amber-800 border-amber-200', icon: '👑', label: 'Administrator' };
+
+                      return (
+                        <tr key={c.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="p-4">
+                            <span className="font-extrabold text-[#0A1628] block">{c.recipient_name}</span>
+                            {c.recipient_contact && (
+                              <span className="text-[10px] text-gray-500 font-mono block">{c.recipient_contact}</span>
+                            )}
+                            {c.notes && (
+                              <span className="text-[10px] text-gray-400 italic mt-0.5 block max-w-xs truncate">{c.notes}</span>
+                            )}
+                          </td>
+                          <td className="p-4">
+                            <span className={`inline-flex items-center gap-1 font-bold font-mono text-[10px] px-2.5 py-1 rounded-full border ${roleBadge.bg}`}>
+                              <span>{roleBadge.icon}</span> {roleBadge.label}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            <div className="inline-flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                              <span className="font-mono font-extrabold text-[#0A1628] dark:text-teal-300 text-xs tracking-wider">
+                                {c.code}
+                              </span>
+                              <button
+                                onClick={() => handleCopyText(c.code, c.id, `Access Code ${c.code}`)}
+                                className="p-0.5 hover:text-[#0D9488] text-slate-400 transition-colors"
+                                title="Copy access code"
+                              >
+                                {copiedCodeId === c.id ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                              </button>
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <div className="space-y-1">
+                              <span className="font-mono text-xs font-bold text-slate-700">
+                                {c.use_count} / {c.max_uses} used
+                              </span>
+                              <div className="w-20 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                                <div
+                                  className={`h-full ${c.use_count >= c.max_uses ? 'bg-slate-400' : 'bg-[#0D9488]'}`}
+                                  style={{ width: `${Math.min(100, (c.use_count / c.max_uses) * 100)}%` }}
+                                />
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <span className={`inline-flex items-center gap-1 font-mono text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                              displayStatus === 'active'
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                : displayStatus === 'used'
+                                ? 'bg-slate-100 text-slate-600 border border-slate-200'
+                                : displayStatus === 'revoked'
+                                ? 'bg-red-100 text-red-800 border border-red-200'
+                                : 'bg-amber-100 text-amber-800 border border-amber-200'
+                            }`}>
+                              {displayStatus === 'active' && '● Active'}
+                              {displayStatus === 'used' && '✓ Used'}
+                              {displayStatus === 'revoked' && '✕ Revoked'}
+                              {displayStatus === 'expired' && '⏱ Expired'}
+                            </span>
+                          </td>
+                          <td className="p-4 text-slate-500 font-mono text-[10px]">
+                            <span className="block font-bold text-slate-700">{c.issued_by_name}</span>
+                            <span>{new Date(c.created_at).toLocaleDateString()}</span>
+                          </td>
+                          <td className="p-4 text-right space-x-1 whitespace-nowrap">
+                            <button
+                              onClick={() => setIssuedSuccessPass(c)}
+                              className="bg-[#0D9488]/10 hover:bg-[#0D9488]/20 text-[#0D9488] font-bold px-2.5 py-1 rounded-lg text-[10px] inline-flex items-center gap-1 cursor-pointer"
+                              title="View & share official invitation pass"
+                            >
+                              <Share2 className="h-3 w-3" /> Share Pass
+                            </button>
+                            {c.status === 'active' && !isExpired && (
+                              <button
+                                onClick={() => handleRevokeCode(c.id, c.code)}
+                                className="bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold px-2 py-1 rounded-lg text-[10px] cursor-pointer"
+                                title="Revoke this code immediately"
+                              >
+                                Revoke
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleDeleteCode(c.id, c.code)}
+                              className="p-1 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded transition-colors inline-block align-middle cursor-pointer"
+                              title="Delete code"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL: ISSUE ACCESS CODE ==================== */}
+      {showIssueModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl border border-slate-100 overflow-hidden text-xs">
+            <div className="bg-[#0A1628] text-white p-4 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Key className="h-4 w-4 text-[#0D9488]" />
+                <span className="font-extrabold font-mono tracking-tight uppercase">Issue Registration Access Code</span>
+              </div>
+              <button
+                onClick={() => setShowIssueModal(false)}
+                className="p-1 hover:bg-slate-800 rounded-full transition-colors cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitIssueCode} className="p-6 space-y-4 font-sans text-slate-700">
+              {/* Role Toggle */}
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1.5 font-mono">
+                  Select Recipient Role *
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIssueRole('provider');
+                      handleGenerateRandomCode('provider', issueRecipientName);
+                    }}
+                    className={`p-3 rounded-xl border text-left font-bold flex items-center gap-2 cursor-pointer transition-all ${
+                      issueRole === 'provider'
+                        ? 'border-teal-500 bg-teal-50 text-teal-900 ring-2 ring-teal-500/20'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Building2 className={`h-5 w-5 ${issueRole === 'provider' ? 'text-[#0D9488]' : 'text-slate-400'}`} />
+                    <div>
+                      <div className="text-xs">Healthcare Clinic</div>
+                      <div className="text-[10px] text-gray-400 font-normal">Hospital, Lab, Pharmacy</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIssueRole('staff');
+                      handleGenerateRandomCode('staff', issueRecipientName);
+                    }}
+                    className={`p-3 rounded-xl border text-left font-bold flex items-center gap-2 cursor-pointer transition-all ${
+                      issueRole === 'staff'
+                        ? 'border-purple-500 bg-purple-50 text-purple-900 ring-2 ring-purple-500/20'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Briefcase className={`h-5 w-5 ${issueRole === 'staff' ? 'text-purple-600' : 'text-slate-400'}`} />
+                    <div>
+                      <div className="text-xs">Insurance Staff</div>
+                      <div className="text-[10px] text-gray-400 font-normal">Underwriter, Claims Staff</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Recipient Name */}
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1 font-mono">
+                  {issueRole === 'provider' ? 'Clinic / Hospital Name *' : 'Staff Member Full Name *'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder={issueRole === 'provider' ? 'e.g. Case Medical Centre Kampala' : 'e.g. Sarah Namukasa'}
+                  value={issueRecipientName}
+                  onChange={e => {
+                    setIssueRecipientName(e.target.value);
+                    if (!issueCode || issueCode.startsWith('CLINIC-') || issueCode.startsWith('STAFF-')) {
+                      handleGenerateRandomCode(issueRole, e.target.value);
+                    }
+                  }}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs bg-white outline-none focus:border-[#0D9488] font-medium"
+                />
+              </div>
+
+              {/* Recipient Contact */}
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1 font-mono">
+                  Recipient Contact Phone / Email
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. admin@clinic.ug or +256 701 234567"
+                  value={issueRecipientContact}
+                  onChange={e => setIssueRecipientContact(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs bg-white outline-none focus:border-[#0D9488]"
+                />
+              </div>
+
+              {/* Access Code Input with Randomizer */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase font-mono">
+                    Assigned Access Code *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateRandomCode(issueRole, issueRecipientName)}
+                    className="text-[10px] text-[#0D9488] hover:text-[#0b7e74] font-bold inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <Sparkles className="h-3 w-3" /> Randomize Code
+                  </button>
+                </div>
+                <div className="relative">
+                  <Key className="h-4 w-4 absolute left-3 top-2.5 text-gray-400" />
+                  <input
+                    type="text"
+                    required
+                    value={issueCode}
+                    onChange={e => setIssueCode(e.target.value.toUpperCase())}
+                    className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-xs bg-slate-50 font-mono font-bold tracking-wider outline-none focus:border-[#0D9488]"
+                  />
+                </div>
+                <span className="text-[10px] text-gray-400 mt-1 block">
+                  The recipient must enter this exact code when registering on the portal.
+                </span>
+              </div>
+
+              {/* Max Uses and Expiry */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1 font-mono">
+                    Usage Allowance
+                  </label>
+                  <select
+                    value={issueMaxUses}
+                    onChange={e => setIssueMaxUses(Number(e.target.value))}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs bg-white outline-none focus:border-[#0D9488]"
+                  >
+                    <option value={1}>Single-use (1 registration)</option>
+                    <option value={3}>3 registrations</option>
+                    <option value={5}>5 registrations</option>
+                    <option value={10}>10 registrations</option>
+                    <option value={50}>Multi-branch (50 registrations)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1 font-mono">
+                    Validity Window
+                  </label>
+                  <select
+                    value={issueExpiresDays}
+                    onChange={e => setIssueExpiresDays(Number(e.target.value))}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs bg-white outline-none focus:border-[#0D9488]"
+                  >
+                    <option value={7}>Valid for 7 days</option>
+                    <option value={30}>Valid for 30 days</option>
+                    <option value={90}>Valid for 90 days</option>
+                    <option value={0}>Never expires</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Administrative Notes */}
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1 font-mono">
+                  Administrative Notes (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Approved by Head of Clinical Services"
+                  value={issueNotes}
+                  onChange={e => setIssueNotes(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs bg-white outline-none focus:border-[#0D9488]"
+                />
+              </div>
+
+              {issueError && (
+                <div className="p-3 bg-red-50 text-red-600 border border-red-200 rounded-xl text-xs font-bold">
+                  {issueError}
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowIssueModal(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-800 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={issueSubmitting}
+                  className="bg-[#0A1628] hover:bg-slate-900 text-white text-xs font-bold px-6 py-2.5 rounded-xl shadow-md transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  {issueSubmitting ? 'Issuing...' : 'Issue Access Code'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL: OFFICIAL ACCESS PASS (SHARE / PRINT) ==================== */}
+      {issuedSuccessPass && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl border border-slate-100 overflow-hidden text-xs">
+            {/* Pass Header Banner */}
+            <div className="bg-gradient-to-r from-[#0A1628] via-[#0E2A3A] to-[#0A1628] text-white p-6 relative">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-teal-500/20 border border-teal-500/40 text-teal-400">
+                    <Shield className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-teal-400 block">
+                      OHIMS Uganda National System
+                    </span>
+                    <h4 className="text-base font-black">Official Registration Access Pass</h4>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIssuedSuccessPass(null)}
+                  className="p-1 hover:bg-white/10 rounded-full transition-colors text-slate-400 hover:text-white cursor-pointer"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {/* Big Access Code Card */}
+              <div className="bg-white/10 backdrop-blur-md border border-teal-400/30 rounded-2xl p-4 text-center mt-4">
+                <span className="text-[10px] font-mono uppercase tracking-widest text-teal-200 block mb-1">
+                  Assigned Access Code
+                </span>
+                <div className="text-2xl font-black font-mono tracking-widest text-white selection:bg-teal-500">
+                  {issuedSuccessPass.code}
+                </div>
+              </div>
+            </div>
+
+            {/* Pass Body Content */}
+            <div className="p-6 space-y-4 font-sans text-slate-700">
+              <div className="grid grid-cols-2 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                <div>
+                  <span className="text-[10px] font-mono text-gray-400 uppercase block">Issued To</span>
+                  <strong className="text-xs text-slate-800 block mt-0.5">{issuedSuccessPass.recipient_name}</strong>
+                  {issuedSuccessPass.recipient_contact && (
+                    <span className="text-[10px] text-gray-500 font-mono">{issuedSuccessPass.recipient_contact}</span>
+                  )}
+                </div>
+                <div>
+                  <span className="text-[10px] font-mono text-gray-400 uppercase block">Designated Role</span>
+                  <span className="inline-block mt-0.5 font-bold text-xs text-[#0D9488]">
+                    {issuedSuccessPass.role === 'provider' ? '🏥 Healthcare Clinic Provider' : '💼 Insurance Staff'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-mono text-gray-400 uppercase block">Usage Limit</span>
+                  <strong className="text-xs text-slate-800 block mt-0.5">
+                    {issuedSuccessPass.max_uses === 1 ? 'Single-use Only' : `${issuedSuccessPass.max_uses} Registrations`}
+                  </strong>
+                </div>
+                <div>
+                  <span className="text-[10px] font-mono text-gray-400 uppercase block">Validity</span>
+                  <strong className="text-xs text-slate-800 block mt-0.5">
+                    {issuedSuccessPass.expires_at ? new Date(issuedSuccessPass.expires_at).toLocaleDateString() : 'Active (No Expiry)'}
+                  </strong>
+                </div>
+              </div>
+
+              {/* Instructions */}
+              <div className="bg-teal-50/70 border border-teal-100 rounded-2xl p-4 space-y-1.5">
+                <strong className="text-xs text-teal-900 font-bold block flex items-center gap-1.5">
+                  <Check className="h-4 w-4 text-teal-600" /> Registration Instructions:
+                </strong>
+                <ol className="list-decimal list-inside text-[11px] text-teal-800 space-y-1 font-medium leading-relaxed">
+                  <li>Visit the OHIMS Portal at <span className="font-mono font-bold">{window.location.origin + window.location.pathname}#/register</span></li>
+                  <li>Select your designated role ({issuedSuccessPass.role === 'provider' ? 'Clinic Provider' : 'Insurance Staff'})</li>
+                  <li>Enter Access Code: <strong className="font-mono bg-white px-1.5 py-0.5 rounded border border-teal-200">{issuedSuccessPass.code}</strong></li>
+                  <li>Submit your account details to immediately access your dashboard.</li>
+                </ol>
+              </div>
+
+              {/* Copy & Share Buttons */}
+              <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                <button
+                  onClick={() => handleCopyText(getInvitationShareText(issuedSuccessPass), 'full-invite', 'Full Invitation Message')}
+                  className="flex-1 bg-[#0D9488] hover:bg-[#0b7e74] text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Share2 className="h-4 w-4" />
+                  <span>{copiedCodeId === 'full-invite' ? 'Copied Invitation ✓' : 'Copy Invitation Message'}</span>
+                </button>
+                <button
+                  onClick={() => handleCopyText(issuedSuccessPass.code, 'code-only', 'Access Code')}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold px-4 py-2.5 rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Copy className="h-4 w-4" />
+                  <span>{copiedCodeId === 'code-only' ? 'Copied ✓' : 'Copy Code Only'}</span>
+                </button>
+                <button
+                  onClick={() => setIssuedSuccessPass(null)}
+                  className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-colors cursor-pointer"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL: MASTER CODES SETTINGS ==================== */}
+      {showMasterModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl border border-slate-100 overflow-hidden text-xs">
+            <div className="bg-[#0A1628] text-white p-4 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Lock className="h-4 w-4 text-purple-400" />
+                <span className="font-extrabold font-mono tracking-tight uppercase">Master Access Keys Configuration</span>
+              </div>
+              <button
+                onClick={() => setShowMasterModal(false)}
+                className="p-1 hover:bg-slate-800 rounded-full transition-colors cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveMasterCodes} className="p-6 space-y-4 font-sans text-slate-700">
+              <p className="text-xs text-gray-500">
+                Update the global master access codes. These master keys provide role-level onboarding authority for partner Clinics, Staff, and Administrators.
+              </p>
+
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1 font-mono">
+                  🏥 Healthcare Provider (Clinic) Master Code
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editMasterClinic}
+                  onChange={e => setEditMasterClinic(e.target.value.toUpperCase())}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs bg-slate-50 font-mono font-bold tracking-wider outline-none focus:border-[#0D9488]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1 font-mono">
+                  💼 Insurance Staff Master Code
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editMasterStaff}
+                  onChange={e => setEditMasterStaff(e.target.value.toUpperCase())}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs bg-slate-50 font-mono font-bold tracking-wider outline-none focus:border-purple-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1 font-mono">
+                  👑 Platform Administrator Master Key
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editMasterAdmin}
+                  onChange={e => setEditMasterAdmin(e.target.value.toUpperCase())}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs bg-slate-50 font-mono font-bold tracking-wider outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowMasterModal(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-800 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={masterModalSaving}
+                  className="bg-[#0A1628] hover:bg-slate-900 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-md transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  {masterModalSaving ? 'Saving...' : 'Deploy Master Keys'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
       {activeTab === 'logs' && (
         <div className="space-y-6">
           <div className="flex justify-between items-center flex-wrap gap-4">

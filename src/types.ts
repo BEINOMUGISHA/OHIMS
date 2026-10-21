@@ -133,3 +133,27 @@ export interface SystemSettings {
   requireProviderAccreditation: boolean;
   allowSelfClaimSubmission: boolean;
 }
+
+export interface AccessCode {
+  id: string;
+  code: string;
+  role: 'provider' | 'staff' | 'admin';
+  recipient_name: string;
+  recipient_contact?: string;
+  notes?: string;
+  status: 'active' | 'used' | 'revoked';
+  max_uses: number;
+  use_count: number;
+  issued_by?: string;
+  issued_by_name: string;
+  expires_at?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface MasterAccessCodes {
+  staff: string;
+  provider: string;
+  admin: string;
+}
+

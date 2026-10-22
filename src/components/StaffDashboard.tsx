@@ -96,13 +96,11 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
   const [showMasterModal, setShowMasterModal] = useState(false);
   const [editMasterStaff, setEditMasterStaff] = useState('');
   const [editMasterClinic, setEditMasterClinic] = useState('');
-  const [editMasterAdmin, setEditMasterAdmin] = useState('');
-  const [showAdminMasterKey, setShowAdminMasterKey] = useState(false);
   const [masterModalSaving, setMasterModalSaving] = useState(false);
 
   // Access codes filters & copy state
   const [accessCodeSearch, setAccessCodeSearch] = useState('');
-  const [accessCodeRoleFilter, setAccessCodeRoleFilter] = useState<'all' | 'provider' | 'staff' | 'admin'>('all');
+  const [accessCodeRoleFilter, setAccessCodeRoleFilter] = useState<'all' | 'provider' | 'staff'>('all');
   const [accessCodeStatusFilter, setAccessCodeStatusFilter] = useState<'all' | 'active' | 'used' | 'revoked'>('all');
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
 
@@ -289,7 +287,14 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
       return;
     }
 
-    showToast(`Access code ${newCode.code} issued successfully!`, 'success');
+    if (newCode.persisted === false) {
+      showToast(
+        `Access code ${newCode.code} created, but it could NOT be saved to the server — it is stored in this browser only and will not work for the recipient.`,
+        'error'
+      );
+    } else {
+      showToast(`Access code ${newCode.code} issued successfully!`, 'success');
+    }
     setShowIssueModal(false);
     setIssuedSuccessPass(newCode);
 
@@ -325,7 +330,6 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
   const handleOpenMasterModal = () => {
     setEditMasterClinic(masterCodes.provider);
     setEditMasterStaff(masterCodes.staff);
-    setEditMasterAdmin(masterCodes.admin);
     setShowMasterModal(true);
   };
 
@@ -336,7 +340,6 @@ function StaffDashboardInner({ currentUser, onRefreshData }: StaffDashboardProps
       {
         provider: editMasterClinic,
         staff: editMasterStaff,
-        admin: editMasterAdmin,
       },
       currentUser.id,
       currentUser.name
@@ -1999,39 +2002,23 @@ For inquiries, contact support@ohims.ug.`;
               </p>
             </div>
 
-            {/* Admin Master Key */}
+            {/* Admin Registration — open access, no code */}
             <div className="bg-gradient-to-br from-slate-900 to-slate-950 text-white p-5 rounded-2xl shadow-sm border border-slate-700/60 relative overflow-hidden">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-[10px] font-mono uppercase tracking-wider text-amber-300 font-bold flex items-center gap-1.5">
-                  <Key className="h-3.5 w-3.5" /> Admin System Key
+                <span className="text-[10px] font-mono uppercase tracking-wider text-teal-300 font-bold flex items-center gap-1.5">
+                  <Key className="h-3.5 w-3.5" /> Admin Registration
                 </span>
-                <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] font-bold px-2 py-0.5 rounded-full font-mono">
-                  High Security
+                <span className="bg-teal-500/20 text-teal-300 border border-teal-500/40 text-[9px] font-bold px-2 py-0.5 rounded-full font-mono">
+                  No Code Required
                 </span>
               </div>
-              <div className="bg-black/40 border border-slate-700 rounded-xl p-3 flex items-center justify-between">
-                <span className="font-mono text-sm font-black tracking-widest text-amber-200">
-                  {showAdminMasterKey ? masterCodes.admin : '••••••••••••••••'}
+              <div className="bg-black/30 border border-teal-500/30 rounded-xl p-3 flex items-center justify-center">
+                <span className="font-mono text-xs font-black tracking-widest text-teal-200">
+                  OPEN REGISTRATION
                 </span>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => setShowAdminMasterKey(!showAdminMasterKey)}
-                    className="p-1.5 hover:bg-white/10 rounded-lg text-slate-300 transition-colors"
-                    title={showAdminMasterKey ? 'Hide key' : 'Show key'}
-                  >
-                    {showAdminMasterKey ? <Unlock className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
-                  </button>
-                  <button
-                    onClick={() => handleCopyText(masterCodes.admin, 'master-admin', 'Admin Master Key')}
-                    className="p-1.5 hover:bg-white/10 rounded-lg text-amber-300 transition-colors flex items-center gap-1 text-[10px] font-bold"
-                    title="Copy code"
-                  >
-                    {copiedCodeId === 'master-admin' ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
-                  </button>
-                </div>
               </div>
               <p className="text-[10px] text-slate-400 mt-2.5 leading-relaxed">
-                Platform administrator root authorization key. Keep strictly confidential and rotate periodically.
+                System Administrator accounts self-register with no access code. Use the Clinic and Staff passes above to onboard partner clinics and internal underwriting staff.
               </p>
             </div>
           </div>
@@ -2048,7 +2035,6 @@ For inquiries, contact support@ohims.ug.`;
                 <option value="all">All Roles</option>
                 <option value="provider">🏥 Clinics & Hospitals</option>
                 <option value="staff">💼 Insurance Staff</option>
-                <option value="admin">👑 Administrators</option>
               </select>
 
               <select
@@ -2563,7 +2549,7 @@ For inquiries, contact support@ohims.ug.`;
 
             <form onSubmit={handleSaveMasterCodes} className="p-6 space-y-4 font-sans text-slate-700">
               <p className="text-xs text-gray-500">
-                Update the global master access codes. These master keys provide role-level onboarding authority for partner Clinics, Staff, and Administrators.
+                Update the global master access codes. These master keys provide role-level onboarding authority for partner Clinics and Insurance Staff. System Administrator accounts register openly and need no access code.
               </p>
 
               <div>
@@ -2589,19 +2575,6 @@ For inquiries, contact support@ohims.ug.`;
                   value={editMasterStaff}
                   onChange={e => setEditMasterStaff(e.target.value.toUpperCase())}
                   className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs bg-slate-50 font-mono font-bold tracking-wider outline-none focus:border-purple-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1 font-mono">
-                  👑 Platform Administrator Master Key
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editMasterAdmin}
-                  onChange={e => setEditMasterAdmin(e.target.value.toUpperCase())}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs bg-slate-50 font-mono font-bold tracking-wider outline-none focus:border-amber-500"
                 />
               </div>
 

@@ -111,8 +111,18 @@ async function startServer() {
         role = "member", access_code = "",
       } = req.body;
 
-      if (!name || !email || !password || !phone || !national_id || !dob || !gender || !address || !selected_plan_id) {
+      // Core fields are required for every role. National ID and Date of Birth are
+      // member-only fields — Staff, Clinic and Admin registrations do not collect them.
+      const isMember = role === "member";
+      const missingCore = !name || !email || !password || !phone || !gender || !address || !selected_plan_id;
+      const missingMemberFields = isMember && (!national_id || !dob);
+      if (missingCore || missingMemberFields) {
         res.status(400).json({ error: "Missing required registration fields" });
+        return;
+      }
+
+      if (!["member", "staff", "provider", "admin"].includes(role)) {
+        res.status(400).json({ error: `Invalid role "${role}". Choose: Member, Staff, Clinic Provider, or Admin.` });
         return;
       }
 
@@ -151,6 +161,16 @@ async function startServer() {
               .maybeSingle();
 
             if (issuedCode) {
+              const expired = issuedCode.expires_at && new Date(issuedCode.expires_at) < new Date();
+              const exhausted = (issuedCode.use_count || 0) >= (issuedCode.max_uses || 1);
+              if (expired) {
+                res.status(400).json({ error: "This access code has expired. Please contact the OHIMS Administrator for a renewed code." });
+                return;
+              }
+              if (exhausted) {
+                res.status(400).json({ error: "This access code has already reached its maximum usage limit." });
+                return;
+              }
               codeValid = true;
               const newCount = (issuedCode.use_count || 0) + 1;
               const newStatus = newCount >= (issuedCode.max_uses || 1) ? "used" : "active";
@@ -171,14 +191,19 @@ async function startServer() {
         return;
       }
 
-      const { data: existingNID } = await db.from("profiles").select("id").ilike("national_id", national_id).maybeSingle();
-      if (existingNID) {
-        res.status(400).json({ error: "This National ID is already registered" });
-        return;
+      // National ID uniqueness applies to members only. Staff, Clinic and Admin
+      // accounts register without a National ID, so they must not collide with
+      // each other on the placeholder value.
+      if (isMember) {
+        const { data: existingNID } = await db.from("profiles").select("id").ilike("national_id", national_id).maybeSingle();
+        if (existingNID) {
+          res.status(400).json({ error: "This National ID is already registered" });
+          return;
+        }
       }
 
-      const { data: targetPlan } = await db.from("plans").select("*").eq("id", selected_plan_id).single();
-      if (!targetPlan) {
+      const { data: targetPlan } = await db.from("plans").select("*").eq("id", selected_plan_id).maybeSingle();
+      if (isMember && !targetPlan) {
         res.status(400).json({ error: "Select a valid insurance plan" });
         return;
       }
@@ -189,8 +214,8 @@ async function startServer() {
         email: email.toLowerCase(),
         name,
         role: role || "member",
-        national_id: national_id.toUpperCase(),
-        dob,
+        national_id: national_id ? national_id.toUpperCase() : null,
+        dob: dob || null,
         gender,
         address,
         phone,
@@ -199,6 +224,18 @@ async function startServer() {
 
       if (profileError) {
         res.status(500).json({ error: profileError.message });
+        return;
+      }
+
+      // Only members hold insurance policies. Staff, Clinic and Admin accounts
+      // are onboarded for system access only.
+      if (!isMember) {
+        await writeAudit(userId, name, "REGISTER_ONBOARDING", "profiles", userId);
+        await addNotification(userId, `Welcome to OHIMS, ${name}! Your ${role} account is ready.`, "success");
+        res.status(201).json({
+          message: `${role === "admin" ? "Administrator" : role === "provider" ? "Clinic Provider" : "Staff"} registered successfully!`,
+          user: { id: userId, name, email: email.toLowerCase(), role, phone },
+        });
         return;
       }
 

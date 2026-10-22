@@ -101,7 +101,7 @@ async function startServer() {
         res.status(400).json({ error: "Missing required registration fields" });
         return;
       }
-      if (role !== "member") {
+      if (role !== "member" && role !== "admin") {
         const cleanCode = (access_code || "").trim().toUpperCase();
         if (!cleanCode) {
           res.status(400).json({ error: `An access code is required to register as ${role}. Please contact the OHIMS Administrator.` });
@@ -109,22 +109,27 @@ async function startServer() {
         }
         const defaultStaff = (process.env.VITE_STAFF_ACCESS_CODE || "STAFF-OHIMS-2026").trim().toUpperCase();
         const defaultClinic = (process.env.VITE_CLINIC_ACCESS_CODE || "CLINIC-OHIMS-2026").trim().toUpperCase();
-        const defaultAdmin = (process.env.VITE_ADMIN_ACCESS_CODE || "ADMIN-OHIMS-2026").trim().toUpperCase();
-        const { data: settings } = await db.from("system_settings").select("staff_access_code, clinic_access_code, admin_access_code").eq("id", 1).maybeSingle();
-        const masterStaff = (settings?.staff_access_code || defaultStaff).trim().toUpperCase();
-        const masterClinic = (settings?.clinic_access_code || defaultClinic).trim().toUpperCase();
-        const masterAdmin = (settings?.admin_access_code || defaultAdmin).trim().toUpperCase();
+        let masterStaff = defaultStaff;
+        let masterClinic = defaultClinic;
+        try {
+          const { data: settings } = await db.from("system_settings").select("staff_access_code, clinic_access_code").eq("id", 1).maybeSingle();
+          if (settings?.staff_access_code) masterStaff = settings.staff_access_code.trim().toUpperCase();
+          if (settings?.clinic_access_code) masterClinic = settings.clinic_access_code.trim().toUpperCase();
+        } catch (_) {
+        }
         let codeValid = false;
         if (role === "staff" && (cleanCode === masterStaff || cleanCode === defaultStaff)) codeValid = true;
         if (role === "provider" && (cleanCode === masterClinic || cleanCode === defaultClinic)) codeValid = true;
-        if (role === "admin" && (cleanCode === masterAdmin || cleanCode === defaultAdmin)) codeValid = true;
         if (!codeValid) {
-          const { data: issuedCode } = await db.from("access_codes").select("*").eq("code", cleanCode).eq("role", role).eq("status", "active").maybeSingle();
-          if (issuedCode) {
-            codeValid = true;
-            const newCount = (issuedCode.use_count || 0) + 1;
-            const newStatus = newCount >= (issuedCode.max_uses || 1) ? "used" : "active";
-            await db.from("access_codes").update({ use_count: newCount, status: newStatus }).eq("id", issuedCode.id);
+          try {
+            const { data: issuedCode } = await db.from("access_codes").select("*").eq("code", cleanCode).eq("role", role).eq("status", "active").maybeSingle();
+            if (issuedCode) {
+              codeValid = true;
+              const newCount = (issuedCode.use_count || 0) + 1;
+              const newStatus = newCount >= (issuedCode.max_uses || 1) ? "used" : "active";
+              await db.from("access_codes").update({ use_count: newCount, status: newStatus }).eq("id", issuedCode.id);
+            }
+          } catch (_) {
           }
         }
         if (!codeValid) {

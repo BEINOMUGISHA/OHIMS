@@ -406,15 +406,45 @@ export default function Register({ plans, onLoginSuccess }: RegisterPageProps) {
               <div className="relative">
                 <KeyRound className="absolute left-3 top-2.5 h-4 w-4 text-amber-500" />
                 <input
-                  type="password"
+                  type={selectedRole === 'admin' ? 'text' : 'password'}
                   required
                   value={accessCode}
                   onChange={(e) => setAccessCode(e.target.value)}
-                  placeholder="Enter your OHIMS role access code"
+                  placeholder={selectedRole === 'admin' ? 'e.g. ADMIN-OHIMS-2026' : 'Enter your OHIMS role access code'}
+                  autoComplete="off"
                   className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/20 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-400 outline-none"
                 />
               </div>
-              <p className="text-[10px] text-slate-400 mt-1">Contact your OHIMS system administrator if you don't have this code.</p>
+              {selectedRole === 'admin' && (
+                <div className="mt-2 p-2 rounded-lg bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800">
+                  <p className="text-[10px] font-semibold text-purple-700 dark:text-purple-300">
+                    👑 First-time Admin Setup
+                  </p>
+                  <p className="text-[10px] text-purple-600 dark:text-purple-400 mt-0.5">
+                    Default bootstrap code: <span className="font-mono font-bold select-all">ADMIN-OHIMS-2026</span>
+                    <button
+                      type="button"
+                      onClick={() => setAccessCode('ADMIN-OHIMS-2026')}
+                      className="ml-2 text-[9px] bg-purple-200 dark:bg-purple-800 hover:bg-purple-300 dark:hover:bg-purple-700 text-purple-800 dark:text-purple-200 px-1.5 py-0.5 rounded font-semibold transition-colors"
+                    >
+                      Auto-fill ↑
+                    </button>
+                  </p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    After your first admin account is created, rotate this code in <span className="font-semibold">Admin Dashboard → Access Codes</span>.
+                  </p>
+                </div>
+              )}
+              {selectedRole === 'staff' && (
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Your OHIMS System Administrator will provide this code. Default: <span className="font-mono">STAFF-OHIMS-2026</span>
+                </p>
+              )}
+              {selectedRole === 'provider' && (
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Your OHIMS System Administrator will provide this code. Default: <span className="font-mono">CLINIC-OHIMS-2026</span>
+                </p>
+              )}
             </div>
           )}
 

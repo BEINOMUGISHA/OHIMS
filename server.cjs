@@ -93,11 +93,44 @@ async function startServer() {
         gender,
         address,
         selected_plan_id,
-        premium_frequency
+        premium_frequency,
+        role = "member",
+        access_code = ""
       } = req.body;
       if (!name || !email || !password || !phone || !national_id || !dob || !gender || !address || !selected_plan_id) {
         res.status(400).json({ error: "Missing required registration fields" });
         return;
+      }
+      if (role !== "member") {
+        const cleanCode = (access_code || "").trim().toUpperCase();
+        if (!cleanCode) {
+          res.status(400).json({ error: `An access code is required to register as ${role}. Please contact the OHIMS Administrator.` });
+          return;
+        }
+        const defaultStaff = (process.env.VITE_STAFF_ACCESS_CODE || "STAFF-OHIMS-2026").trim().toUpperCase();
+        const defaultClinic = (process.env.VITE_CLINIC_ACCESS_CODE || "CLINIC-OHIMS-2026").trim().toUpperCase();
+        const defaultAdmin = (process.env.VITE_ADMIN_ACCESS_CODE || "ADMIN-OHIMS-2026").trim().toUpperCase();
+        const { data: settings } = await db.from("system_settings").select("staff_access_code, clinic_access_code, admin_access_code").eq("id", 1).maybeSingle();
+        const masterStaff = (settings?.staff_access_code || defaultStaff).trim().toUpperCase();
+        const masterClinic = (settings?.clinic_access_code || defaultClinic).trim().toUpperCase();
+        const masterAdmin = (settings?.admin_access_code || defaultAdmin).trim().toUpperCase();
+        let codeValid = false;
+        if (role === "staff" && (cleanCode === masterStaff || cleanCode === defaultStaff)) codeValid = true;
+        if (role === "provider" && (cleanCode === masterClinic || cleanCode === defaultClinic)) codeValid = true;
+        if (role === "admin" && (cleanCode === masterAdmin || cleanCode === defaultAdmin)) codeValid = true;
+        if (!codeValid) {
+          const { data: issuedCode } = await db.from("access_codes").select("*").eq("code", cleanCode).eq("role", role).eq("status", "active").maybeSingle();
+          if (issuedCode) {
+            codeValid = true;
+            const newCount = (issuedCode.use_count || 0) + 1;
+            const newStatus = newCount >= (issuedCode.max_uses || 1) ? "used" : "active";
+            await db.from("access_codes").update({ use_count: newCount, status: newStatus }).eq("id", issuedCode.id);
+          }
+        }
+        if (!codeValid) {
+          res.status(400).json({ error: `Invalid access code for ${role === "provider" ? "Clinic Provider" : "Staff"}. Please contact your administrator.` });
+          return;
+        }
       }
       const { data: existingEmail } = await db.from("profiles").select("id").ilike("email", email).maybeSingle();
       if (existingEmail) {
@@ -119,7 +152,7 @@ async function startServer() {
         id: userId,
         email: email.toLowerCase(),
         name,
-        role: "member",
+        role: role || "member",
         national_id: national_id.toUpperCase(),
         dob,
         gender,
@@ -945,6 +978,96 @@ async function startServer() {
       });
       await writeAudit(requester.id, requester.name, "SYSTEM_SETTINGS_UPDATE", "system_settings", "1");
       res.json({ message: "Settings saved." });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+  app.get("/api/access-codes", authenticateUser, async (req, res) => {
+    try {
+      const requester = req.user;
+      if (!["admin", "staff"].includes(requester.role)) {
+        res.status(403).json({ error: "Staff only" });
+        return;
+      }
+      const { data: issued } = await db.from("access_codes").select("*").order("created_at", { ascending: false });
+      const { data: settings } = await db.from("system_settings").select("staff_access_code, clinic_access_code, admin_access_code").eq("id", 1).maybeSingle();
+      const master = {
+        staff: settings?.staff_access_code || process.env.VITE_STAFF_ACCESS_CODE || "STAFF-OHIMS-2026",
+        provider: settings?.clinic_access_code || process.env.VITE_CLINIC_ACCESS_CODE || "CLINIC-OHIMS-2026",
+        admin: settings?.admin_access_code || process.env.VITE_ADMIN_ACCESS_CODE || "ADMIN-OHIMS-2026"
+      };
+      res.json({ issued: issued || [], master });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+  app.post("/api/access-codes", authenticateUser, async (req, res) => {
+    try {
+      const requester = req.user;
+      if (!["admin", "staff"].includes(requester.role)) {
+        res.status(403).json({ error: "Admin/Staff only" });
+        return;
+      }
+      const { code, role, recipient_name, recipient_contact, notes, max_uses, expires_at } = req.body;
+      if (!code || !role || !recipient_name) {
+        res.status(400).json({ error: "Code, role, and recipient_name are required." });
+        return;
+      }
+      const cleanCode = code.trim().toUpperCase();
+      const newRecord = {
+        code: cleanCode,
+        role,
+        recipient_name: recipient_name.trim(),
+        recipient_contact: (recipient_contact || "").trim(),
+        notes: (notes || "").trim(),
+        status: "active",
+        max_uses: Number(max_uses) || 1,
+        use_count: 0,
+        issued_by: requester.id,
+        issued_by_name: requester.name || "Admin",
+        expires_at: expires_at || null
+      };
+      const { data, error } = await db.from("access_codes").insert(newRecord).select().single();
+      if (error) {
+        res.status(500).json({ error: error.message });
+        return;
+      }
+      await writeAudit(requester.id, requester.name, `ISSUED_${role.toUpperCase()}_ACCESS_CODE`, "access_codes", data.id);
+      res.status(201).json({ message: "Access code issued successfully.", accessCode: data });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+  app.put("/api/access-codes/master", authenticateUser, async (req, res) => {
+    try {
+      const requester = req.user;
+      if (!["admin", "staff"].includes(requester.role)) {
+        res.status(403).json({ error: "Admin only" });
+        return;
+      }
+      const { staff, provider, admin } = req.body;
+      const updates = {};
+      if (staff) updates.staff_access_code = staff.trim().toUpperCase();
+      if (provider) updates.clinic_access_code = provider.trim().toUpperCase();
+      if (admin) updates.admin_access_code = admin.trim().toUpperCase();
+      await db.from("system_settings").upsert({ id: 1, ...updates });
+      await writeAudit(requester.id, requester.name, "UPDATED_MASTER_ACCESS_CODES", "access_codes", "master");
+      res.json({ message: "Master access codes updated." });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+  app.delete("/api/access-codes/:id", authenticateUser, async (req, res) => {
+    try {
+      const requester = req.user;
+      if (!["admin", "staff"].includes(requester.role)) {
+        res.status(403).json({ error: "Admin/Staff only" });
+        return;
+      }
+      const { id } = req.params;
+      await db.from("access_codes").update({ status: "revoked" }).eq("id", id);
+      await writeAudit(requester.id, requester.name, "REVOKED_ACCESS_CODE", "access_codes", id);
+      res.json({ message: "Access code revoked." });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }

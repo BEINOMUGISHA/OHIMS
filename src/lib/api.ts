@@ -427,12 +427,14 @@ export const authApi = {
       } = payload;
 
       // ── Access Code Validation ─────────────────────────────────────
+      // Admin registers freely — they issue codes to Staff & Clinics from the dashboard.
+      // Only Staff and Clinic/Provider roles require an access code.
       const validRoles = Object.keys(ROLE_ACCESS_CODES);
       if (!validRoles.includes(role)) {
         throw new Error(`Invalid role "${role}". Choose: Member, Staff, Clinic Provider, or Admin.`);
       }
 
-      if (role !== 'member') {
+      if (role !== 'member' && role !== 'admin') {
         const verifyRes = await accessCodesApi.verify(role, access_code);
         if (!verifyRes.valid) {
           throw new Error(

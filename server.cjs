@@ -97,8 +97,15 @@ async function startServer() {
         role = "member",
         access_code = ""
       } = req.body;
-      if (!name || !email || !password || !phone || !national_id || !dob || !gender || !address || !selected_plan_id) {
+      const isMember = role === "member";
+      const missingCore = !name || !email || !password || !phone || !gender || !address || !selected_plan_id;
+      const missingMemberFields = isMember && (!national_id || !dob);
+      if (missingCore || missingMemberFields) {
         res.status(400).json({ error: "Missing required registration fields" });
+        return;
+      }
+      if (!["member", "staff", "provider", "admin"].includes(role)) {
+        res.status(400).json({ error: `Invalid role "${role}". Choose: Member, Staff, Clinic Provider, or Admin.` });
         return;
       }
       if (role !== "member" && role !== "admin") {
@@ -124,6 +131,16 @@ async function startServer() {
           try {
             const { data: issuedCode } = await db.from("access_codes").select("*").eq("code", cleanCode).eq("role", role).eq("status", "active").maybeSingle();
             if (issuedCode) {
+              const expired = issuedCode.expires_at && new Date(issuedCode.expires_at) < /* @__PURE__ */ new Date();
+              const exhausted = (issuedCode.use_count || 0) >= (issuedCode.max_uses || 1);
+              if (expired) {
+                res.status(400).json({ error: "This access code has expired. Please contact the OHIMS Administrator for a renewed code." });
+                return;
+              }
+              if (exhausted) {
+                res.status(400).json({ error: "This access code has already reached its maximum usage limit." });
+                return;
+              }
               codeValid = true;
               const newCount = (issuedCode.use_count || 0) + 1;
               const newStatus = newCount >= (issuedCode.max_uses || 1) ? "used" : "active";
@@ -142,13 +159,15 @@ async function startServer() {
         res.status(400).json({ error: "An account with this email already exists" });
         return;
       }
-      const { data: existingNID } = await db.from("profiles").select("id").ilike("national_id", national_id).maybeSingle();
-      if (existingNID) {
-        res.status(400).json({ error: "This National ID is already registered" });
-        return;
+      if (isMember) {
+        const { data: existingNID } = await db.from("profiles").select("id").ilike("national_id", national_id).maybeSingle();
+        if (existingNID) {
+          res.status(400).json({ error: "This National ID is already registered" });
+          return;
+        }
       }
-      const { data: targetPlan } = await db.from("plans").select("*").eq("id", selected_plan_id).single();
-      if (!targetPlan) {
+      const { data: targetPlan } = await db.from("plans").select("*").eq("id", selected_plan_id).maybeSingle();
+      if (isMember && !targetPlan) {
         res.status(400).json({ error: "Select a valid insurance plan" });
         return;
       }
@@ -158,8 +177,8 @@ async function startServer() {
         email: email.toLowerCase(),
         name,
         role: role || "member",
-        national_id: national_id.toUpperCase(),
-        dob,
+        national_id: national_id ? national_id.toUpperCase() : null,
+        dob: dob || null,
         gender,
         address,
         phone,
@@ -167,6 +186,15 @@ async function startServer() {
       });
       if (profileError) {
         res.status(500).json({ error: profileError.message });
+        return;
+      }
+      if (!isMember) {
+        await writeAudit(userId, name, "REGISTER_ONBOARDING", "profiles", userId);
+        await addNotification(userId, `Welcome to OHIMS, ${name}! Your ${role} account is ready.`, "success");
+        res.status(201).json({
+          message: `${role === "admin" ? "Administrator" : role === "provider" ? "Clinic Provider" : "Staff"} registered successfully!`,
+          user: { id: userId, name, email: email.toLowerCase(), role, phone }
+        });
         return;
       }
       const policyId = `POL-${(/* @__PURE__ */ new Date()).getFullYear()}-${Date.now().toString().slice(-6)}`;

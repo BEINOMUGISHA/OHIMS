@@ -149,6 +149,8 @@ export interface AccessCode {
   expires_at?: string;
   created_at: string;
   updated_at?: string;
+  /** false when the pass could not be written to the database and lives only in this browser */
+  persisted?: boolean;
 }
 
 export interface MasterAccessCodes {

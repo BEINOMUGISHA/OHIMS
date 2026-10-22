@@ -201,18 +201,30 @@ export const accessCodesApi = {
 
   list: async (): Promise<ApiResponse<AccessCode[]>> => {
     return safeCall(async () => {
+      let dbRows: AccessCode[] | null = null;
       try {
         const { data, error } = await supabase
           .from('access_codes')
           .select('*')
           .order('created_at', { ascending: false });
 
-        if (!error && data && data.length > 0) {
-          saveStoredIssuedCodes(data as AccessCode[]);
-          return data as AccessCode[];
-        }
+        if (!error && Array.isArray(data)) dbRows = data as AccessCode[];
       } catch (_) {}
-      return getStoredIssuedCodes();
+
+      const localRows = getStoredIssuedCodes();
+
+      // The database is the source of truth, but codes issued while the row could not
+      // be written (offline, RLS, table missing) must stay visible to the admin
+      // instead of silently disappearing from the Access Codes table.
+      if (dbRows === null) return localRows;
+
+      const dbCodes = new Set(dbRows.map((c) => (c.code || '').toUpperCase()));
+      const localOnly = localRows.filter((c) => !dbCodes.has((c.code || '').toUpperCase()));
+      const merged = [...dbRows, ...localOnly].sort((a, b) =>
+        String(b.created_at || '').localeCompare(String(a.created_at || ''))
+      );
+      saveStoredIssuedCodes(merged);
+      return merged;
     });
   },
 
@@ -228,7 +240,10 @@ export const accessCodesApi = {
     issued_by_name?: string;
   }): Promise<ApiResponse<AccessCode>> => {
     return safeCall(async () => {
-      const id = `code-${Date.now()}-${Math.floor(Math.random() * 9000) + 1000}`;
+      // access_codes.id is a UUID primary key in Postgres. A non-UUID id (e.g.
+      // "code-1700000000000-1234") is rejected with 22P02 "invalid input syntax for
+      // type uuid" and the pass is never persisted — so a real UUID is required.
+      const id = uuidv4();
       const now = new Date().toISOString();
       const record: AccessCode = {
         id,
@@ -254,8 +269,9 @@ export const accessCodesApi = {
           .select()
           .single();
         if (!error && data) {
+          const persisted = { ...(data as AccessCode), persisted: true };
           const list = getStoredIssuedCodes();
-          saveStoredIssuedCodes([data as AccessCode, ...list.filter((c) => c.id !== id)]);
+          saveStoredIssuedCodes([persisted, ...list.filter((c) => c.code !== persisted.code)]);
           await writeAudit(
             payload.issued_by || null,
             payload.issued_by_name || 'Admin',
@@ -263,9 +279,12 @@ export const accessCodesApi = {
             'access_codes',
             data.id
           );
-          return data as AccessCode;
+          return persisted;
         }
-      } catch (_) {}
+        console.warn('[accessCodesApi.issue] Database write failed — code kept locally only:', error?.message);
+      } catch (e: any) {
+        console.warn('[accessCodesApi.issue] Database write threw — code kept locally only:', e?.message);
+      }
 
       // Fallback local storage
       const list = getStoredIssuedCodes();
@@ -280,7 +299,7 @@ export const accessCodesApi = {
         record.id
       );
 
-      return record;
+      return { ...record, persisted: false };
     });
   },
 
@@ -399,11 +418,11 @@ export const accessCodesApi = {
 export const authApi = {
   /**
    * Role-Based Registration with Dynamic Access Code Validation.
-   * Admin issues access codes to Clinics and Staff.
+   * Admin issues access codes to Clinics and Staff from the Admin Dashboard.
    * Member → open registration (no code needed)
    * Staff  → requires Admin-issued code or active Staff master code
    * Provider/Clinic → requires Admin-issued code or active Clinic master code
-   * Admin  → requires Admin master code
+   * Admin  → open registration (no code needed; issues codes to Staff & Clinics)
    */
   register: async (payload: {
     name: string;

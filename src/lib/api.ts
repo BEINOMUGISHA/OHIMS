@@ -149,6 +149,24 @@ function saveStoredIssuedCodes(list: AccessCode[]): void {
 
 export const accessCodesApi = {
   getMasterCodes: async (): Promise<MasterAccessCodes> => {
+    // Preferred path: privileged RPC (Staff/Admin only). Keeps the master
+    // codes out of direct table reads.
+    try {
+      const { data, error } = await supabase.rpc('fn_get_master_codes');
+      if (!error && data && typeof data === 'object') {
+        const d = data as Record<string, string | null | undefined>;
+        const stored = getStoredMasterCodes();
+        const merged: MasterAccessCodes = {
+          staff: (d.staff || '').trim() || stored.staff,
+          provider: (d.provider || '').trim() || stored.provider,
+          admin: (d.admin || '').trim() || stored.admin,
+        };
+        saveStoredMasterCodes(merged);
+        return merged;
+      }
+    } catch (_) {}
+
+    // Fallback for schemas where fn_get_master_codes is not deployed yet.
     try {
       const { data } = await supabase
         .from('system_settings')
@@ -348,20 +366,80 @@ export const accessCodesApi = {
       };
     }
 
-    // 1. Check Master Codes
+    // 1. Preferred path: the code is verified INSIDE the database, so master
+    //    codes and issued passes are never shipped to the browser and one
+    //    use is consumed atomically.
+    try {
+      const { data, error } = await supabase.rpc('fn_verify_access_code', {
+        p_code: codeClean,
+        p_role: role,
+      });
+
+      if (!error && data) {
+        const res = data as {
+          valid?: boolean;
+          reason?: string;
+          code?: string;
+          role?: string;
+          max_uses?: number;
+          use_count?: number;
+          expires_at?: string | null;
+          recipient_name?: string;
+        };
+
+        if (res.valid) {
+          const codeRecord: AccessCode = {
+            id: '',
+            code: res.code || codeClean,
+            role: res.role === 'staff' ? 'staff' : res.role === 'provider' ? 'provider' : 'admin',
+            recipient_name: res.recipient_name || '',
+            status: 'active',
+            max_uses: res.max_uses ?? 1,
+            use_count: res.use_count ?? 0,
+            issued_by_name: 'Admin',
+            created_at: new Date().toISOString(),
+            expires_at: res.expires_at || undefined,
+          };
+          return { valid: true, codeRecord };
+        }
+
+        if (res.reason === 'expired') {
+          return { valid: false, message: 'This access code has expired. Please contact the administrator for a renewed code.' };
+        }
+        if (res.reason === 'exhausted') {
+          return { valid: false, message: 'This access code has already reached its maximum usage limit.' };
+        }
+        const rpcRoleLabel =
+          role === 'provider'
+            ? 'Clinic / Healthcare Provider'
+            : role === 'staff'
+            ? 'Insurance Staff'
+            : 'Administrator';
+        return {
+          valid: false,
+          message: `Invalid access code for ${rpcRoleLabel}. Please contact the OHIMS Administrator to receive an approved access code.`,
+        };
+      }
+    } catch (_) {
+      // fn_verify_access_code is not deployed yet — fall through to the legacy path.
+    }
+
+    // ── Legacy path: only used while fn_verify_access_code is unavailable ──
+
+    // 2. Check Master Codes
     const masterCodes = await accessCodesApi.getMasterCodes();
     const masterTarget = masterCodes[role as keyof MasterAccessCodes];
     if (masterTarget && masterTarget.toUpperCase() === codeClean) {
       return { valid: true };
     }
 
-    // 2. Check Static Env Code fallback
+    // 3. Check Static Env Code fallback
     const envTarget = ROLE_ACCESS_CODES[role];
     if (envTarget && envTarget.toUpperCase() === codeClean) {
       return { valid: true };
     }
 
-    // 3. Check Issued Access Codes (Database / Storage)
+    // 4. Check Issued Access Codes (Database / Storage)
     const { data: issuedList } = await accessCodesApi.list();
     const matched = (issuedList || []).find(
       (c) => c.code.toUpperCase() === codeClean && c.role === role
@@ -1319,7 +1397,11 @@ export const settingsApi = {
     allowSelfClaimSubmission: boolean;
   }>> => {
     return safeCall(async () => {
-      const { data, error } = await supabase.from('system_settings').select('*').eq('id', 1).single();
+      const { data, error } = await supabase
+        .from('system_settings')
+        .select('allow_auto_approval, low_claim_threshold, auto_sla_days, require_accreditation, allow_self_submit')
+        .eq('id', 1)
+        .single();
       if (error) throw error;
       return {
         allowAutoApprovalOfLowClaims: data.allow_auto_approval,

@@ -1,5 +1,5 @@
 -- =====================================================================
--- OHIMS Uganda — Security Hardening
+-- OHIMS Uganda — Security Hardening  (v2)
 --   1. PROFILES      : block privilege escalation (self-promotion to admin)
 --   2. ACCESS CODES  : verify codes in the database, stop exposing them
 --   3. MASTER CODES  : invalidate the values that were shipped publicly
@@ -76,9 +76,15 @@ begin
 end;
 $$;
 
-drop trigger if exists trg_profiles_guard_role on public.profiles;
-create trigger trg_profiles_guard_role
-  before insert or update of role on public.profiles
+-- Two separate triggers: one for inserts, one for role updates.
+drop trigger if exists trg_profiles_guard_role_ins on public.profiles;
+create trigger trg_profiles_guard_role_ins
+  before insert on public.profiles
+  for each row execute function public.fn_guard_profile_role();
+
+drop trigger if exists trg_profiles_guard_role_upd on public.profiles;
+create trigger trg_profiles_guard_role_upd
+  before update of role on public.profiles
   for each row execute function public.fn_guard_profile_role();
 
 -- 1.2  A signed-in user may only create a profile row for their own
@@ -207,7 +213,9 @@ grant execute on function public.fn_get_master_codes() to authenticated, service
 --       which let anyone holding the public anon key read every live code
 --       together with recipient names and contact numbers.)
 drop policy if exists "access_codes: public verify lookup" on public.access_codes;
+revoke select on public.access_codes from public;
 revoke select on public.access_codes from anon;
+grant select on public.access_codes to authenticated, service_role;
 
 drop policy if exists "access_codes: staff and admin manage" on public.access_codes;
 create policy "access_codes: staff and admin manage" on public.access_codes
@@ -215,11 +223,25 @@ create policy "access_codes: staff and admin manage" on public.access_codes
 
 -- 2.4  Hide the master-code columns from direct table reads.
 --       The dashboard reads them through fn_get_master_codes() instead.
+revoke select on public.system_settings from public;
 revoke select on public.system_settings from anon;
 revoke select on public.system_settings from authenticated;
-grant select (id, allow_auto_approval, low_claim_threshold, auto_sla_days,
-               require_accreditation, allow_self_submit, updated_at)
-  on public.system_settings to anon, authenticated;
+grant select on public.system_settings to service_role;
+
+-- Grant every column EXCEPT the three master-code columns to anon/authenticated.
+do $$
+declare
+  cols text;
+begin
+  select string_agg(format('%I', column_name), ', ') into cols
+    from information_schema.columns
+   where table_schema = 'public'
+     and table_name   = 'system_settings'
+     and column_name not in ('staff_access_code', 'clinic_access_code', 'admin_access_code');
+  if cols is not null then
+    execute format('grant select (%s) on public.system_settings to anon, authenticated', cols);
+  end if;
+end $$;
 
 
 -- ─────────────────────────────────────────────────────────────────────
@@ -239,18 +261,43 @@ update public.system_settings
        admin_access_code  = 'ADMIN-'  || upper(substr(md5(random()::text), 1, 10))
  where id = 1;
 
--- Show the freshly issued master codes so they can be copied immediately.
-select staff_access_code, clinic_access_code, admin_access_code
-  from public.system_settings where id = 1;
-
--- Reload the PostgREST schema cache so the new grants/policies take effect.
+-- Reload the PostgREST schema cache so the new functions and grants take effect.
 notify pgr, 'reload schema';
+
+
+-- =====================================================================
+-- CONFIRMATION — run this last block and check the output
+-- =====================================================================
+select current_database()                                   as database,
+       current_user                                         as run_as,
+       (select count(*) from public.access_codes where code = 'CLINIC-MULAGO-2026')
+                                                          as ohims_project_marker,
+       (select count(*) from pg_proc
+         where proname in ('fn_verify_access_code','fn_get_master_codes','fn_guard_profile_role'))
+                                                          as hardening_functions,
+       (select count(*) from pg_policies
+         where tablename in ('profiles','access_codes'))    as profiles_and_code_policies,
+       has_table_privilege('anon','public.access_codes','SELECT')
+                                                          as anon_can_read_codes,
+       has_table_privilege('authenticated','public.system_settings','SELECT')
+                                                          as authenticated_reads_all_settings,
+       (select staff_access_code from public.system_settings where id = 1)
+                                                          as staff_master_code,
+       (select clinic_access_code from public.system_settings where id = 1)
+                                                          as clinic_master_code;
+
+-- Expected: ohims_project_marker = 1 (you are on the right project),
+--            hardening_functions = 3, anon_can_read_codes = false,
+--            authenticated_reads_all_settings = false,
+--            staff_master_code / clinic_master_code start with STAFF- / CLINIC-
+--            (not the old OHIMS-2026 values).
 
 
 -- =====================================================================
 -- ROLLBACK (run only if you need to undo the whole patch)
 -- =====================================================================
--- drop trigger if exists trg_profiles_guard_role on public.profiles;
+-- drop trigger if exists trg_profiles_guard_role_ins on public.profiles;
+-- drop trigger if exists trg_profiles_guard_role_upd on public.profiles;
 -- drop function if exists public.fn_guard_profile_role();
 -- drop policy if exists "profiles: self insert" on public.profiles;
 -- create policy "profiles: public insert" on public.profiles

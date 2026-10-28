@@ -11,6 +11,16 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 
+function isWebGLAvailable() {
+  try {
+    const canvas = document.createElement('canvas');
+    return !!(window.WebGLRenderingContext && (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')));
+  } catch {
+    return false;
+  }
+}
+
+
 interface ThreeBackgroundProps {
   theme?: 'light' | 'dark';
 }
@@ -20,7 +30,7 @@ export default function ThreeBackground({ theme = 'dark' }: ThreeBackgroundProps
 
   useEffect(() => {
     const container = mountRef.current;
-    if (!container) return;
+    if (!container || !isWebGLAvailable()) return;
 
     // 1. Scene, Camera & Lighting Setup
     const scene = new THREE.Scene();

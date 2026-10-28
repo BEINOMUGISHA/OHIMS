@@ -37,7 +37,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
   // Bypass API calls to Supabase (always fetch live data)
-  if (url.origin.includes('supabase.co')) {
+  if (url.origin.includes('supabase.co') || url.pathname.startsWith('/api')) {
     return;
   }
 

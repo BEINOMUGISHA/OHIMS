@@ -5,6 +5,16 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+
+function isWebGLAvailable() {
+  try {
+    const testCanvas = document.createElement('canvas');
+    return !!(window.WebGLRenderingContext && (testCanvas.getContext('webgl') || testCanvas.getContext('experimental-webgl')));
+  } catch {
+    return false;
+  }
+}
+
 import { 
   Heart, 
   Activity, 

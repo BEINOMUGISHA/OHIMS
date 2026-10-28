@@ -69,6 +69,7 @@ function hashPassword(pw: string): string {
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
+  const HOST = process.env.HOST || "0.0.0.0";
 
   app.use(express.json({ limit: "10mb" }));
 
@@ -1316,8 +1317,8 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, () => {
-    console.log(`\n🚀 OHIMS running at http://localhost:${PORT}`);
+  app.listen(PORT, HOST, () => {
+    console.log(`\n🚀 OHIMS running at http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`);
     console.log(`📦 Supabase: ${SUPABASE_URL}`);
     console.log(`🌍 Mode: ${process.env.NODE_ENV || "development"}\n`);
   });

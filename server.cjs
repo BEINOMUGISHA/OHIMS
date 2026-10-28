@@ -65,6 +65,7 @@ function hashPassword(pw) {
 async function startServer() {
   const app = (0, import_express.default)();
   const PORT = Number(process.env.PORT) || 3e3;
+  const HOST = process.env.HOST || "0.0.0.0";
   app.use(import_express.default.json({ limit: "10mb" }));
   const authenticateUser = async (req, res, next) => {
     const authHeader = req.headers.authorization;
@@ -1189,9 +1190,9 @@ For specific account queries, direct users to contact support@ohims.ug.`;
     });
     app.use(vite.middlewares);
   }
-  app.listen(PORT, () => {
+  app.listen(PORT, HOST, () => {
     console.log(`
-\u{1F680} OHIMS running at http://localhost:${PORT}`);
+\u{1F680} OHIMS running at http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`);
     console.log(`\u{1F4E6} Supabase: ${SUPABASE_URL}`);
     console.log(`\u{1F30D} Mode: ${process.env.NODE_ENV || "development"}
 `);

@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a1628"/>
+      <stop offset="100%" stop-color="#0f2942"/>
+    </linearGradient>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d9488"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Background Canvas -->
+  <rect width="512" height="512" rx="100" fill="url(#bgGrad)"/>
+
+  <!-- Subtle Border -->
+  <rect width="504" height="504" x="4" y="4" rx="96" fill="none" stroke="#0d9488" stroke-width="6" stroke-opacity="0.4"/>
+
+  <!-- Uganda Ribbon Accent (Black, Yellow, Red) -->
+  <g transform="translate(0, 480)">
+    <rect x="100" y="0" width="104" height="8" fill="#111827"/>
+    <rect x="204" y="0" width="104" height="8" fill="#FACC15"/>
+    <rect x="308" y="0" width="104" height="8" fill="#EF4444"/>
+  </g>
+
+  <!-- Shield Base -->
+  <path d="M 256,70 C 350,70 410,110 410,210 C 410,340 280,415 256,435 C 232,415 102,340 102,210 C 102,110 162,70 256,70 Z" 
+        fill="url(#shieldGrad)" 
+        filter="url(#glow)"/>
+
+  <!-- Inner Dark Contrast Shield -->
+  <path d="M 256,95 C 335,95 385,130 385,215 C 385,325 275,390 256,408 C 237,390 127,325 127,215 C 127,130 177,95 256,95 Z" 
+        fill="#0a1628" 
+        fill-opacity="0.88"/>
+
+  <!-- Medical Cross Symbol -->
+  <path d="M 230,160 L 282,160 L 282,215 L 337,215 L 337,267 L 282,267 L 282,322 L 230,322 L 230,267 L 175,267 L 175,215 L 230,215 Z" 
+        fill="#0d9488"/>
+
+  <!-- Heartbeat ECG Pulse Line -->
+  <path d="M 160,241 L 210,241 L 225,200 L 245,285 L 265,225 L 285,255 L 300,241 L 352,241" 
+        fill="none" 
+        stroke="#ffffff" 
+        stroke-width="7" 
+        stroke-linecap="round" 
+        stroke-linejoin="round"/>
+</svg>

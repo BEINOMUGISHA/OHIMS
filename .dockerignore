@@ -1,0 +1,11 @@
+# Ignore build artifacts and local files in Docker context
+node_modules
+dist
+.env*
+!.env.example
+.git
+.github
+.vercel
+coverage
+*.log
+*.map

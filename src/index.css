@@ -81,14 +81,16 @@ body {
   animation: ambientPulse 3s infinite ease-in-out;
 }
 
-/* Momentum scrolling for iOS WebKit */
+/* Momentum scrolling for iOS WebKit and cross-platform scroll behaviour */
 .overflow-y-auto,
 .overflow-x-auto,
 .overflow-auto {
-  -webkit-overflow-scrolling: touch;
+  -webkit-overflow-scrolling: touch;  /* iOS momentum scroll */
+  overscroll-behavior: contain;       /* Prevents scroll chaining on Android/Desktop */
 }
 
 /* Custom Scrollbar for Cross-Platform Elegance */
+/* Webkit (Chrome, Safari, Edge, Android WebView, iOS WKWebView) */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -106,6 +108,12 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(13, 148, 136, 0.8);
   box-shadow: 0 0 10px rgba(13, 148, 136, 0.8);
+}
+
+/* Standard scrollbar properties (Firefox, future browsers) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(13, 148, 136, 0.4) transparent;
 }
 
 /* Smooth transition for theme switches */
